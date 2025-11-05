@@ -8,6 +8,7 @@
     "Tags": [ "market", "automation", "retainer", "universalis" ],
     "CategoryTags": [ "Utility", "Automation" ],
     "AssemblyVersion": "1.0.0.0",
+    "ApplicableVersion": "any",
     "DalamudApiLevel": 13,
     "HasConfigUi": true,
     "HasMainUi": true,
