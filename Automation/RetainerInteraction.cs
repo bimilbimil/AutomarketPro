@@ -34,7 +34,7 @@ namespace AutomarketPro.Automation
         {
             try
             {
-                // Use RetainerManager.Instance() like AutoRetainer does (GameRetainerManager.cs)
+                // Use RetainerManager.Instance() to access retainer data
                 var retainerManager = RetainerManager.Instance();
                 if (retainerManager == null)
                 {
@@ -44,12 +44,12 @@ namespace AutomarketPro.Automation
                 
                 Log?.Invoke($"[AutoMarket] RetainerManager found, Retainers array length: {retainerManager->Retainers.Length}");
                 
-                // Count retainers that have valid IDs and names (matching AutoRetainer pattern)
+                // Count retainers that have valid IDs and names
                 int count = 0;
                 for (int i = 0; i < retainerManager->Retainers.Length; i++)
                 {
                     var retainer = retainerManager->Retainers[i];
-                    // Valid retainer has RetainerId != 0 and Name[0] != 0 (matching AutoRetainer's GameRetainerManager)
+                    // Valid retainer has RetainerId != 0 and Name[0] != 0
                     if (retainer.RetainerId != 0 && retainer.Name[0] != 0)
                     {
                         // Read name - Name is a SeString span
@@ -86,7 +86,7 @@ namespace AutomarketPro.Automation
         
         /// <summary>
         /// Gets the current number of items listed on the market board for a specific retainer.
-        /// Uses RetainerManager.MarketItemCount (same as AutoRetainer's GameRetainerManager.MarkerItemCount).
+        /// Uses RetainerManager.MarketItemCount.
         /// </summary>
         public unsafe int GetRetainerMarketItemCount(int retainerIndex)
         {
@@ -242,7 +242,7 @@ namespace AutomarketPro.Automation
                     Log?.Invoke($"[AutoMarket] Successfully sent click event for retainer {retainerIndex}");
                     
                     // After clicking retainer, wait for SelectString to appear
-                    // Talk addon clicking is handled by Tick() method running every frame (like AutoRetainer)
+                    // Talk addon clicking is handled by Tick() method running every frame
                     Log?.Invoke("[AutoMarket] Waiting for SelectString to appear after clicking retainer...");
                     
                     bool selectStringFound = false;

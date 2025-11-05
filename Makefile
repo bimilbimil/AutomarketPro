@@ -105,13 +105,14 @@ package: $(BUILD_DLL) $(BUILD_JSON)
 		cd .. && \
 		zip -q dist/$(PROJECT_NAME).zip $(JSON_NAME) 2>/dev/null && \
 		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME).zip $(PROJECT_NAME).yaml 2>/dev/null || true) && \
-		([ -f automarketlogo.webp ] && zip -q dist/$(PROJECT_NAME).zip automarketlogo.webp 2>/dev/null || true)
+		([ -f automarketlogo.webp ] && zip -q dist/$(PROJECT_NAME).zip automarketlogo.webp 2>/dev/null || true) && \
+		([ -f automarketlogo.png ] && zip -q dist/$(PROJECT_NAME).zip automarketlogo.png 2>/dev/null || true)
 	@if [ -f dist/$(PROJECT_NAME).zip ]; then \
 		echo "✅ Package created: dist/$(PROJECT_NAME).zip"; \
 		ls -lh dist/$(PROJECT_NAME).zip; \
 		echo ""; \
 		echo "Package contents:"; \
-		unzip -l dist/$(PROJECT_NAME).zip | grep -E "\.(dll|json|yaml|webp)$$" || echo "  (checking contents...)"; \
+		unzip -l dist/$(PROJECT_NAME).zip | grep -E "\.(dll|json|yaml|webp|png)$$" || echo "  (checking contents...)"; \
 	else \
 		echo "❌ Package creation failed"; \
 		exit 1; \
@@ -127,13 +128,14 @@ package-dev: $(BUILD_DLL) $(BUILD_JSON)
 		cd .. && \
 		zip -q dist/$(PROJECT_NAME)-dev.zip $(JSON_NAME) 2>/dev/null && \
 		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME)-dev.zip $(PROJECT_NAME).yaml 2>/dev/null || true) && \
-		([ -f automarketlogo.webp ] && zip -q dist/$(PROJECT_NAME)-dev.zip automarketlogo.webp 2>/dev/null || true)
+		([ -f automarketlogo.webp ] && zip -q dist/$(PROJECT_NAME)-dev.zip automarketlogo.webp 2>/dev/null || true) && \
+		([ -f automarketlogo.png ] && zip -q dist/$(PROJECT_NAME)-dev.zip automarketlogo.png 2>/dev/null || true)
 	@if [ -f dist/$(PROJECT_NAME)-dev.zip ]; then \
 		echo "✅ Dev package created: dist/$(PROJECT_NAME)-dev.zip"; \
 		ls -lh dist/$(PROJECT_NAME)-dev.zip; \
 		echo ""; \
 		echo "Package contents:"; \
-		unzip -l dist/$(PROJECT_NAME)-dev.zip | grep -E "\.(dll|json|yaml|webp)$$" || echo "  (checking contents...)"; \
+		unzip -l dist/$(PROJECT_NAME)-dev.zip | grep -E "\.(dll|json|yaml|webp|png)$$" || echo "  (checking contents...)"; \
 	else \
 		echo "❌ Package creation failed"; \
 		exit 1; \

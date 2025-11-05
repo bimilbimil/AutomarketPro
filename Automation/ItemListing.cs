@@ -279,7 +279,7 @@ namespace AutomarketPro.Automation
                     return false;
                 }
                 
-                // Get "Put Up for Sale" text from Addon sheet row 99 (same as AutoRetainer)
+                // Get "Put Up for Sale" text from Addon sheet row 99
                 string putUpForSaleText = "Put Up for Sale";
                 try
                 {
@@ -479,7 +479,7 @@ namespace AutomarketPro.Automation
                     return false;
                 }
                 
-                // Get "Have Retainer Sell Items" text from Addon sheet row 5480 (same as AutoRetainer)
+                // Get "Have Retainer Sell Items" text from Addon sheet row 5480
                 string retainerSellText = "Have Retainer Sell Items";
                 try
                 {

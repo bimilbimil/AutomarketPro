@@ -33,6 +33,7 @@
     <None Include="AutomarketPro.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="AutomarketPro.yaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="automarketlogo.webp" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="automarketlogo.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   
  <ItemGroup>
@@ -66,10 +67,4 @@
   </Reference>
 </ItemGroup>
 
-<ItemGroup>
-  <Compile Remove="AutoRetainer/**" />
-  <Compile Remove="ECommons/**" />
-  <Compile Remove="Dagobert/**" />
-  <Compile Remove="temp_references/**" />
-</ItemGroup>
 </Project>
