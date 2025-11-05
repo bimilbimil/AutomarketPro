@@ -42,7 +42,8 @@ Automates inventory scanning, marketboard listing, and vendor selling using Univ
    - `AutomarketPro.dll` - The plugin assembly
    - `AutomarketPro.json` - Plugin manifest
    - `AutomarketPro.yaml` - Alternative manifest (if needed)
-   - `automarketlogo.webp` - Plugin icon
+   
+**Note:** Dependencies like ECommons and ImGui.NET are provided by Dalamud and do not need to be included in the package.
 4. Restart Dalamud or reload plugins
 
 ### Method 3: Build from Source
@@ -87,10 +88,11 @@ To create a zip package for distribution:
 make package
 ```
 This creates `dist/AutomarketPro.zip` containing:
-- `AutomarketPro.dll`
-- `AutomarketPro.json`
-- `AutomarketPro.yaml`
-- `automarketlogo.webp`
+- `AutomarketPro.dll` - Main plugin assembly
+- `AutomarketPro.json` - Plugin manifest
+- `AutomarketPro.yaml` - Alternative manifest (optional)
+
+**Note:** Dependencies (ECommons, ImGui.NET) are provided by Dalamud and should not be included in the package.
 
 **For Dev Installation:**
 ```bash
