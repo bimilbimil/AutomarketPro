@@ -21,9 +21,9 @@ Automates inventory scanning, marketboard listing, and vendor selling using Univ
 2. Navigate to the **Experimental** tab
 3. Look for **"Add Plugin Repository"** or **"Custom Plugin Repositories"** section
 4. Click **"Add"** or **"+"** to add a new repository
-5. Enter the GitHub repository URL:
+5. Enter the repository JSON URL:
    ```
-   https://raw.githubusercontent.com/bimilbimil/AutomarketPro/main/AutomarketPro.json
+   https://raw.githubusercontent.com/bimilbimil/AutomarketPro/main/repo.json
    ```
 6. Click **"Save"** or **"OK"**
 7. The plugin should now appear in your experimental plugins list
@@ -32,13 +32,18 @@ Automates inventory scanning, marketboard listing, and vendor selling using Univ
 
 **Note:** If the plugin doesn't appear, you may need to manually add it using Method 2 or Method 3.
 
-### Method 2: Manual Installation
+### Method 2: Manual Installation from Release
 
-1. Download the latest release from [GitHub Releases](https://github.com/bimilbimil/AutomarketPro/releases)
-2. Extract the plugin files to your Dalamud plugins directory:
+1. Download the latest release zip from [GitHub Releases](https://github.com/bimilbimil/AutomarketPro/releases)
+2. Extract the zip file contents to your Dalamud plugins directory:
    - **Windows (XIVLauncher)**: `%APPDATA%\XIVLauncher\addon\Hooks\dev\plugins`
    - **macOS (XIV on Mac)**: `~/Library/Application Support/XIV on Mac/dalamud/Hooks/dev/plugins`
-3. Restart Dalamud or reload plugins
+3. The zip contains:
+   - `AutomarketPro.dll` - The plugin assembly
+   - `AutomarketPro.json` - Plugin manifest
+   - `AutomarketPro.yaml` - Alternative manifest (if needed)
+   - `automarketlogo.webp` - Plugin icon
+4. Restart Dalamud or reload plugins
 
 ### Method 3: Build from Source
 
@@ -72,6 +77,36 @@ Automates inventory scanning, marketboard listing, and vendor selling using Univ
    ```bash
    make build
    ```
+
+### Creating Release Packages
+
+To create a zip package for distribution:
+
+**For Release:**
+```bash
+make package
+```
+This creates `dist/AutomarketPro.zip` containing:
+- `AutomarketPro.dll`
+- `AutomarketPro.json`
+- `AutomarketPro.yaml`
+- `automarketlogo.webp`
+
+**For Dev Installation:**
+```bash
+make package-dev
+```
+This creates `dist/AutomarketPro-dev.zip` with the same contents.
+
+**Note:** The zip files are created in the `dist/` directory and can be uploaded to GitHub Releases or used for manual installation.
+
+**Important:** When creating a new release on GitHub:
+1. Create a release tag (e.g., `v1.0.0.0`)
+2. Upload the `AutomarketPro.zip` file from `dist/` to the release
+3. Update `repo.json` with the new version number and release URL:
+   - Update `AssemblyVersion` to match the new version
+   - Update `DownloadLinkInstall`, `DownloadLinkUpdate`, and `DownloadLinkTesting` URLs to point to the new release zip
+   - Commit and push the updated `repo.json` to the repository
 
 ## Usage
 

@@ -95,6 +95,50 @@ info:
 		ls -lh $(PLUGIN_DIR)/$(PROJECT_NAME).* 2>/dev/null || echo "  No files installed"; \
 	fi
 
+# Package plugin for release
+package: $(BUILD_DLL) $(BUILD_JSON)
+	@echo "📦 Creating release package..."
+	@mkdir -p dist
+	@rm -f dist/$(PROJECT_NAME).zip
+	@cd $(BUILD_DIR) && \
+		zip -q ../../dist/$(PROJECT_NAME).zip $(DLL_NAME) 2>/dev/null && \
+		cd .. && \
+		zip -q dist/$(PROJECT_NAME).zip $(JSON_NAME) 2>/dev/null && \
+		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME).zip $(PROJECT_NAME).yaml 2>/dev/null || true) && \
+		([ -f automarketlogo.webp ] && zip -q dist/$(PROJECT_NAME).zip automarketlogo.webp 2>/dev/null || true)
+	@if [ -f dist/$(PROJECT_NAME).zip ]; then \
+		echo "✅ Package created: dist/$(PROJECT_NAME).zip"; \
+		ls -lh dist/$(PROJECT_NAME).zip; \
+		echo ""; \
+		echo "Package contents:"; \
+		unzip -l dist/$(PROJECT_NAME).zip | grep -E "\.(dll|json|yaml|webp)$$" || echo "  (checking contents...)"; \
+	else \
+		echo "❌ Package creation failed"; \
+		exit 1; \
+	fi
+
+# Package plugin for dev installation
+package-dev: $(BUILD_DLL) $(BUILD_JSON)
+	@echo "📦 Creating dev package..."
+	@mkdir -p dist
+	@rm -f dist/$(PROJECT_NAME)-dev.zip
+	@cd $(BUILD_DIR) && \
+		zip -q ../../dist/$(PROJECT_NAME)-dev.zip $(DLL_NAME) 2>/dev/null && \
+		cd .. && \
+		zip -q dist/$(PROJECT_NAME)-dev.zip $(JSON_NAME) 2>/dev/null && \
+		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME)-dev.zip $(PROJECT_NAME).yaml 2>/dev/null || true) && \
+		([ -f automarketlogo.webp ] && zip -q dist/$(PROJECT_NAME)-dev.zip automarketlogo.webp 2>/dev/null || true)
+	@if [ -f dist/$(PROJECT_NAME)-dev.zip ]; then \
+		echo "✅ Dev package created: dist/$(PROJECT_NAME)-dev.zip"; \
+		ls -lh dist/$(PROJECT_NAME)-dev.zip; \
+		echo ""; \
+		echo "Package contents:"; \
+		unzip -l dist/$(PROJECT_NAME)-dev.zip | grep -E "\.(dll|json|yaml|webp)$$" || echo "  (checking contents...)"; \
+	else \
+		echo "❌ Package creation failed"; \
+		exit 1; \
+	fi
+
 # Help message
 help:
 	@echo "AutomarketPro Plugin Makefile"
@@ -103,6 +147,8 @@ help:
 	@echo "  make build      - Build and deploy plugin (default)"
 	@echo "  make build-only - Build without deploying"
 	@echo "  make deploy     - Deploy files (after building)"
+	@echo "  make package    - Create release zip package"
+	@echo "  make package-dev - Create dev zip package"
 	@echo "  make clean      - Clean build artifacts"
 	@echo "  make rebuild    - Clean and rebuild"
 	@echo "  make info       - Show plugin file information"

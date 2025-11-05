@@ -126,6 +126,10 @@ Desktop.ini
 imgui.nupkg
 InventoryPricer.zip
 
+# Distribution packages (keep dist/ directory but ignore zip files)
+dist/*.zip
+!dist/.gitkeep
+
 # Lock files (optional - uncomment if you want to ignore them)
 # packages.lock.json
 

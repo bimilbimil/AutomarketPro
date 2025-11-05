@@ -30,8 +30,8 @@
   </ItemGroup>
   
   <ItemGroup>
-    <None Include="*.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="*.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="AutomarketPro.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="AutomarketPro.yaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="automarketlogo.webp" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   
