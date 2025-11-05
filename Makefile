@@ -102,6 +102,8 @@ package: $(BUILD_DLL) $(BUILD_JSON)
 	@rm -f dist/$(PROJECT_NAME).zip
 	@cd $(BUILD_DIR) && \
 		([ -f $(DLL_NAME) ] && zip -q ../../dist/$(PROJECT_NAME).zip $(DLL_NAME) || (echo "❌ $(DLL_NAME) not found" && exit 1)) && \
+		([ -f ECommons.dll ] && zip -q ../../dist/$(PROJECT_NAME).zip ECommons.dll || echo "⚠️  ECommons.dll not found - may cause loading issues") && \
+		([ -f $(DLL_NAME:.dll=.deps.json) ] && zip -q ../../dist/$(PROJECT_NAME).zip $(DLL_NAME:.dll=.deps.json) || echo "⚠️  $(DLL_NAME:.dll=.deps.json) not found") && \
 		cd ../.. && \
 		([ -f $(JSON_NAME) ] && zip -q dist/$(PROJECT_NAME).zip $(JSON_NAME) || (echo "❌ $(JSON_NAME) not found" && exit 1)) && \
 		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME).zip $(PROJECT_NAME).yaml || true)
@@ -123,6 +125,8 @@ package-dev: $(BUILD_DLL) $(BUILD_JSON)
 	@rm -f dist/$(PROJECT_NAME)-dev.zip
 	@cd $(BUILD_DIR) && \
 		([ -f $(DLL_NAME) ] && zip -q ../../dist/$(PROJECT_NAME)-dev.zip $(DLL_NAME) || (echo "❌ $(DLL_NAME) not found" && exit 1)) && \
+		([ -f ECommons.dll ] && zip -q ../../dist/$(PROJECT_NAME)-dev.zip ECommons.dll || echo "⚠️  ECommons.dll not found - may cause loading issues") && \
+		([ -f $(DLL_NAME:.dll=.deps.json) ] && zip -q ../../dist/$(PROJECT_NAME)-dev.zip $(DLL_NAME:.dll=.deps.json) || echo "⚠️  $(DLL_NAME:.dll=.deps.json) not found") && \
 		cd ../.. && \
 		([ -f $(JSON_NAME) ] && zip -q dist/$(PROJECT_NAME)-dev.zip $(JSON_NAME) || (echo "❌ $(JSON_NAME) not found" && exit 1)) && \
 		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME)-dev.zip $(PROJECT_NAME).yaml || true)
