@@ -1,0 +1,75 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <NoWarn>CA1416</NoWarn>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <AssemblyName>AutomarketPro</AssemblyName>
+    <RootNamespace>AutomarketPro</RootNamespace>
+    <Platforms>x64</Platforms>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+  
+  <PropertyGroup>
+    <NoWarn>CA1416</NoWarn>
+    <!-- Windows path (XIVLauncher) -->
+    <DalamudLibPath Condition="'$(OS)' == 'Windows_NT'">$(appdata)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
+    <!-- macOS path (XIV on Mac) -->
+    <DalamudLibPath Condition="'$(OS)' != 'Windows_NT'">$(HOME)/Library/Application Support/XIV on Mac/dalamud/Hooks/dev/</DalamudLibPath>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <PackageReference Include="ECommons" Version="3.0.1.23" />
+    <PackageReference Include="ImGui.NET" Version="1.89.9.1" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <None Include="*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="*.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="automarketlogo.webp" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  
+ <ItemGroup>
+  <Reference Include="FFXIVClientStructs">
+    <HintPath>$(DalamudLibPath)FFXIVClientStructs.dll</HintPath>
+    <Private>false</Private>
+  </Reference>
+  <Reference Include="Newtonsoft.Json">
+    <HintPath>$(DalamudLibPath)Newtonsoft.Json.dll</HintPath>
+    <Private>false</Private>
+  </Reference>
+  <Reference Include="Dalamud">
+    <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
+    <Private>false</Private>
+  </Reference>
+  <Reference Include="Dalamud.Bindings.ImGui">
+    <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
+    <Private>false</Private>
+  </Reference>
+  <Reference Include="Lumina">
+    <HintPath>$(DalamudLibPath)Lumina.dll</HintPath>
+    <Private>false</Private>
+  </Reference>
+  <Reference Include="Lumina.Excel">
+    <HintPath>$(DalamudLibPath)Lumina.Excel.dll</HintPath>
+    <Private>false</Private>
+  </Reference>
+  <Reference Include="InteropGenerator.Runtime">
+    <HintPath>$(DalamudLibPath)InteropGenerator.Runtime.dll</HintPath>
+    <Private>false</Private>
+  </Reference>
+</ItemGroup>
+
+<ItemGroup>
+  <Compile Remove="AutoRetainer/**" />
+  <Compile Remove="ECommons/**" />
+  <Compile Remove="Dagobert/**" />
+  <Compile Remove="temp_references/**" />
+</ItemGroup>
+</Project>
