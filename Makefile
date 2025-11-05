@@ -101,18 +101,16 @@ package: $(BUILD_DLL) $(BUILD_JSON)
 	@mkdir -p dist
 	@rm -f dist/$(PROJECT_NAME).zip
 	@cd $(BUILD_DIR) && \
-		zip -q ../../dist/$(PROJECT_NAME).zip $(DLL_NAME) 2>/dev/null && \
-		cd .. && \
-		zip -q dist/$(PROJECT_NAME).zip $(JSON_NAME) 2>/dev/null && \
-		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME).zip $(PROJECT_NAME).yaml 2>/dev/null || true) && \
-		([ -f automarketlogo.webp ] && zip -q dist/$(PROJECT_NAME).zip automarketlogo.webp 2>/dev/null || true) && \
-		([ -f automarketlogo.png ] && zip -q dist/$(PROJECT_NAME).zip automarketlogo.png 2>/dev/null || true)
+		([ -f $(DLL_NAME) ] && zip -q ../../dist/$(PROJECT_NAME).zip $(DLL_NAME) || (echo "❌ $(DLL_NAME) not found" && exit 1)) && \
+		cd ../.. && \
+		([ -f $(JSON_NAME) ] && zip -q dist/$(PROJECT_NAME).zip $(JSON_NAME) || (echo "❌ $(JSON_NAME) not found" && exit 1)) && \
+		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME).zip $(PROJECT_NAME).yaml || true)
 	@if [ -f dist/$(PROJECT_NAME).zip ]; then \
 		echo "✅ Package created: dist/$(PROJECT_NAME).zip"; \
 		ls -lh dist/$(PROJECT_NAME).zip; \
 		echo ""; \
 		echo "Package contents:"; \
-		unzip -l dist/$(PROJECT_NAME).zip | grep -E "\.(dll|json|yaml|webp|png)$$" || echo "  (checking contents...)"; \
+		unzip -l dist/$(PROJECT_NAME).zip | grep -E "\.(dll|json|yaml)$$" || echo "  (checking contents...)"; \
 	else \
 		echo "❌ Package creation failed"; \
 		exit 1; \
@@ -124,18 +122,16 @@ package-dev: $(BUILD_DLL) $(BUILD_JSON)
 	@mkdir -p dist
 	@rm -f dist/$(PROJECT_NAME)-dev.zip
 	@cd $(BUILD_DIR) && \
-		zip -q ../../dist/$(PROJECT_NAME)-dev.zip $(DLL_NAME) 2>/dev/null && \
-		cd .. && \
-		zip -q dist/$(PROJECT_NAME)-dev.zip $(JSON_NAME) 2>/dev/null && \
-		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME)-dev.zip $(PROJECT_NAME).yaml 2>/dev/null || true) && \
-		([ -f automarketlogo.webp ] && zip -q dist/$(PROJECT_NAME)-dev.zip automarketlogo.webp 2>/dev/null || true) && \
-		([ -f automarketlogo.png ] && zip -q dist/$(PROJECT_NAME)-dev.zip automarketlogo.png 2>/dev/null || true)
+		([ -f $(DLL_NAME) ] && zip -q ../../dist/$(PROJECT_NAME)-dev.zip $(DLL_NAME) || (echo "❌ $(DLL_NAME) not found" && exit 1)) && \
+		cd ../.. && \
+		([ -f $(JSON_NAME) ] && zip -q dist/$(PROJECT_NAME)-dev.zip $(JSON_NAME) || (echo "❌ $(JSON_NAME) not found" && exit 1)) && \
+		([ -f $(PROJECT_NAME).yaml ] && zip -q dist/$(PROJECT_NAME)-dev.zip $(PROJECT_NAME).yaml || true)
 	@if [ -f dist/$(PROJECT_NAME)-dev.zip ]; then \
 		echo "✅ Dev package created: dist/$(PROJECT_NAME)-dev.zip"; \
 		ls -lh dist/$(PROJECT_NAME)-dev.zip; \
 		echo ""; \
 		echo "Package contents:"; \
-		unzip -l dist/$(PROJECT_NAME)-dev.zip | grep -E "\.(dll|json|yaml|webp|png)$$" || echo "  (checking contents...)"; \
+		unzip -l dist/$(PROJECT_NAME)-dev.zip | grep -E "\.(dll|json|yaml)$$" || echo "  (checking contents...)"; \
 	else \
 		echo "❌ Package creation failed"; \
 		exit 1; \

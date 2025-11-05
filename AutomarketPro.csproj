@@ -32,8 +32,7 @@
   <ItemGroup>
     <None Include="AutomarketPro.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="AutomarketPro.yaml" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="automarketlogo.webp" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="automarketlogo.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="automarketlogo_icon_64.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   
  <ItemGroup>
