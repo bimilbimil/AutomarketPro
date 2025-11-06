@@ -48,67 +48,7 @@ Automates inventory scanning, marketboard listing, and vendor selling using Univ
 
 ### Method 3: Build from Source
 
-1. Build the plugin using the instructions in the "Building from Source" section below
-2. Copy the built files (`AutomarketPro.dll`, `AutomarketPro.json`) to your Dalamud plugins directory:
-   - **Windows (XIVLauncher)**: `%APPDATA%\XIVLauncher\addon\Hooks\dev\plugins`
-   - **macOS (XIV on Mac)**: `~/Library/Application Support/XIV on Mac/dalamud/Hooks/dev/plugins`
-3. Restart Dalamud or reload plugins
-
-## Building from Source
-
-### Prerequisites
-
-- .NET 9.0 SDK
-- Dalamud development environment set up
-
-### Build Steps
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/bimilbimil/AutomarketPro.git
-   cd AutomarketPro
-   ```
-
-2. Build the project:
-   ```bash
-   dotnet build
-   ```
-
-   Or use the Makefile:
-   ```bash
-   make build
-   ```
-
-### Creating Release Packages
-
-To create a zip package for distribution:
-
-**For Release:**
-```bash
-make package
-```
-This creates `dist/AutomarketPro.zip` containing:
-- `AutomarketPro.dll` - Main plugin assembly
-- `AutomarketPro.json` - Plugin manifest
-- `AutomarketPro.yaml` - Alternative manifest (optional)
-
-**Note:** Dependencies (ECommons, ImGui.NET) are provided by Dalamud and should not be included in the package.
-
-**For Dev Installation:**
-```bash
-make package-dev
-```
-This creates `dist/AutomarketPro-dev.zip` with the same contents.
-
-**Note:** The zip files are created in the `dist/` directory and can be uploaded to GitHub Releases or used for manual installation.
-
-**Important:** When creating a new release on GitHub:
-1. Create a release tag (e.g., `v1.0.0.0`)
-2. Upload the `AutomarketPro.zip` file from `dist/` to the release
-3. Update `repo.json` with the new version number and release URL:
-   - Update `AssemblyVersion` to match the new version
-   - Update `DownloadLinkInstall`, `DownloadLinkUpdate`, and `DownloadLinkTesting` URLs to point to the new release zip
-   - Commit and push the updated `repo.json` to the repository
+For development and building from source, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Usage
 
@@ -164,11 +104,12 @@ Enable Debug Logs in the Settings tab to see detailed logging information. This 
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## Contributing
+
+Interested in contributing? Check out [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, build instructions, and contribution guidelines.
+
 ## Repository
 
 GitHub: https://github.com/bimilbimil/AutomarketPro
 
-## Disclaimer
-
-This plugin automates interactions with the game. Use at your own risk and in accordance with Square Enix's Terms of Service.
 
