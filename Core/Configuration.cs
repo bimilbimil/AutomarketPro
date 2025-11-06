@@ -16,8 +16,8 @@ namespace AutomarketPro.Core
         public bool AutoUndercut { get; set; } = true;
         
         // Automation settings
-        public int ActionDelay { get; set; } = 500;
-        public int RetainerDelay { get; set; } = 2000;
+        public int ActionDelay { get; set; } = 300;
+        public int RetainerDelay { get; set; } = 1200;
         public bool ListOnlyMode { get; set; } = false;
         public bool VendorOnlyMode { get; set; } = false;
         
@@ -50,8 +50,8 @@ namespace AutomarketPro.Core
             UndercutAmount = 1;
             MinProfitThreshold = 100;
             AutoUndercut = true;
-            ActionDelay = 500;
-            RetainerDelay = 2000;
+            ActionDelay = 300;
+            RetainerDelay = 1200;
             ListOnlyMode = false;
             VendorOnlyMode = false;
             SkipHQItems = false;

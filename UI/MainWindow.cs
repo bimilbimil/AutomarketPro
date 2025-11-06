@@ -551,6 +551,19 @@ namespace AutomarketPro.UI
                     return;
                 }
                 
+                // Display current world at the top
+                var worldName = Scanner.CurrentWorldName;
+                if (string.IsNullOrEmpty(worldName))
+                {
+                    SafeTextColored(new Vector4(0.8f, 0.8f, 0.2f, 1), "Current World: Loading...");
+                }
+                else
+                {
+                    SafeText($"Current World: {worldName}");
+                }
+                
+                ImGui.Separator();
+                
                 var items = Scanner.Items ?? new List<ScannedItem>();
                 
                 SafeText($"Inventory Scan Results ({items.Count} items)");

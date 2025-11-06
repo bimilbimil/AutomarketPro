@@ -60,6 +60,9 @@ namespace AutomarketPro.Services
             AutomationToken = new CancellationTokenSource();
             LastRunSummary = new RunSummary();
             
+            // Send chat message when automation starts
+            Plugin?.PrintChat("[AutoMarket] Automation started...");
+            
             try
             {
                 StatusUpdate?.Invoke("Starting automation cycle...");
@@ -77,7 +80,7 @@ namespace AutomarketPro.Services
                 // Wait for scan to complete
                 while (Scanner.Scanning && !AutomationToken.Token.IsCancellationRequested)
                 {
-                    await Task.Delay(100);
+                    await Task.Delay(60);
                 }
                 
                 var config = Plugin.Configuration;
@@ -123,12 +126,26 @@ namespace AutomarketPro.Services
                 Log($"  → Vendored {LastRunSummary.ItemsVendored} items");
                 Log($"  → Estimated revenue: {LastRunSummary.EstimatedRevenue:N0} gil");
                 
+                // Send chat message when automation completes successfully
+                if (LastRunSummary != null)
+                {
+                    Plugin?.PrintChat($"[AutoMarket] Automation complete! Listed {LastRunSummary.ItemsListed} items, vendored {LastRunSummary.ItemsVendored} items.");
+                }
+                else
+                {
+                    Plugin?.PrintChat("[AutoMarket] Automation complete!");
+                }
+                
                 StatusUpdate?.Invoke("Automation complete!");
             }
             catch (Exception ex)
             {
                 LogError("[AutoMarket] Automation error", ex);
                 StatusUpdate?.Invoke($"Error: {ex.Message}");
+                
+                // Send chat message if automation failed
+                var errorMessage = ex?.Message ?? "Unknown error";
+                Plugin?.PrintChat($"[AutoMarket] Automation failed: {errorMessage}");
             }
             finally
             {
@@ -200,7 +217,7 @@ namespace AutomarketPro.Services
             }
             
             // Add delay after selecting "Sell items" before starting to list items
-            await Task.Delay(1000, token);
+                await Task.Delay(600, token);
             
             int itemsListedThisRetainer = 0;
             while (profitable.Count > 0 && itemsListedThisRetainer < itemsToAttempt && !token.IsCancellationRequested)
@@ -234,7 +251,7 @@ namespace AutomarketPro.Services
                 LastRunSummary.EstimatedRevenue += item.ListingPrice * item.Quantity;
                 
                 // Refresh current listings count after successful listing
-                await Task.Delay(500, token);
+                await Task.Delay(300, token);
                 currentListings = RetainerInteraction.GetRetainerMarketItemCount(retainerIndex);
                 
                 // Delay between listings - make it longer if we already have items listed
@@ -250,11 +267,12 @@ namespace AutomarketPro.Services
                 // Check for pause
                 while (IsPaused && !token.IsCancellationRequested)
                 {
-                    await Task.Delay(100);
+                    await Task.Delay(60);
                 }
             }
             
             // Process unprofitable items (vendor them)
+            bool weVendored = false; // Track if we vendored any items during this retainer session
             while (unprofitable.Count > 0 && !token.IsCancellationRequested)
             {
                 var item = unprofitable.Peek(); // Peek to check before dequeueing
@@ -271,6 +289,7 @@ namespace AutomarketPro.Services
                 
                 // Successfully vendored
                 unprofitable.Dequeue();
+                weVendored = true; // Mark that we vendored at least one item
                 StatusUpdate?.Invoke($"Vendored {item.ItemName ?? "Item#" + item.ItemId} for {item.VendorPrice:N0} gil");
                 
                 LastRunSummary.ItemsVendored++;
@@ -282,7 +301,7 @@ namespace AutomarketPro.Services
                 // Check for pause
                 while (IsPaused && !token.IsCancellationRequested)
                 {
-                    await Task.Delay(100);
+                    await Task.Delay(60);
                 }
             }
             
@@ -293,11 +312,11 @@ namespace AutomarketPro.Services
             {
                 Log($"[AutoMarket] Closing retainer {retainerIndex} - {profitable.Count} profitable, {unprofitable.Count} unprofitable items remaining, {currentListings}/{maxListings} listings");
                 
-                // Close RetainerSell window first
-                await ItemListing.CloseRetainerWindow(token);
+                // Close RetainerSell window first (pass weVendored flag)
+                await ItemListing.CloseRetainerWindow(weVendored, token);
                 
-                // Close RetainerList window to return to retainer selection
-                await ItemListing.CloseRetainerList(token);
+                // Close RetainerList window to return to retainer selection (pass weVendored flag)
+                await ItemListing.CloseRetainerList(weVendored, token);
             }
             
             LastRunSummary.TotalItems = LastRunSummary.ItemsListed + LastRunSummary.ItemsVendored;

@@ -119,7 +119,8 @@ This creates `dist/AutomarketPro-dev.zip` with the same contents.
    - Action delays
    - Filter options (skip HQ items, collectables, gear)
 3. Click "Scan Only" to scan your inventory and see market prices
-4. Click "Start Full Cycle" to begin automated listing and vendoring
+4. Click "Start Full Cycle" to begin automated listing and vendoring (Make sure Retainer List is open!)
+   1. Moving your mouse may cause some issues, let the automation finish before doing anything!
 
 ### Commands
 

@@ -136,7 +136,7 @@ namespace AutomarketPro.Automation
                     return false;
                 }
                 
-                await Task.Delay(100, token);
+                await Task.Delay(60, token);
                 
                 bool eventSent = false;
                 unsafe

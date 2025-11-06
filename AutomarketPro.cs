@@ -116,8 +116,58 @@ namespace AutomarketPro
             }
         }
         private ICommandManager? _commandManager;
-        [PluginService] public IChatGui ChatGui { get; private set; } = null!;
+        [PluginService] public IChatGui ChatGui 
+        { 
+            get => _chatGui!;
+            private set 
+            {
+                _chatGui = value;
+            }
+        }
+        private IChatGui? _chatGui;
         [PluginService] public IClientState ClientState { get; private set; } = null!;
+        
+        /// <summary>
+        /// Helper method to print messages to chat. Can be called from any thread.
+        /// ChatGui.Print is thread-safe according to Dalamud documentation.
+        /// </summary>
+        public void PrintChat(string message)
+        {
+            try
+            {
+                // Validate input
+                if (string.IsNullOrEmpty(message))
+                {
+                    return;
+                }
+                
+                // Use backing field directly to avoid potential null reference issues
+                var chatGui = _chatGui;
+                if (chatGui == null)
+                {
+                    return;
+                }
+                
+                // Sanitize message to prevent issues with special characters or very long messages
+                var safeMessage = message.Length > 500 ? message.Substring(0, 500) + "..." : message;
+                
+                // Call directly like PennyPincher does - ChatGui.Print is thread-safe
+                chatGui.Print(safeMessage);
+            }
+            catch (Exception ex)
+            {
+                // Use try-catch to prevent logging from causing another crash
+                try
+                {
+                    var errorMsg = ex?.Message ?? "Unknown error";
+                    PluginLog?.Warning($"Failed to print chat message: {errorMsg}");
+                }
+                catch
+                {
+                    // Silently fail if even logging fails
+                }
+            }
+        }
         [PluginService] public IDataManager? DataManager 
         { 
             get => _dataManager;
