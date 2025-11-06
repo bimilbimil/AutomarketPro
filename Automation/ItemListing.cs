@@ -49,14 +49,14 @@ namespace AutomarketPro.Automation
                 }
                 
                 uint lowestPrice = item.ListingPrice;
-                await Task.Delay(100, token);
+                await Task.Delay(60, token);
                 
                 bool priceFound = false;
                 for (int compareAttempt = 0; compareAttempt < 2; compareAttempt++)
                 {
                     if (compareAttempt > 0)
                     {
-                        await Task.Delay(500, token);
+                        await Task.Delay(180, token);
                     }
                     
                     bool clickedCompare = false;
@@ -72,7 +72,7 @@ namespace AutomarketPro.Automation
                     
                     if (clickedCompare)
                     {
-                        await Task.Delay(500, token);
+                        await Task.Delay(180, token);
                         var price = await GetLowestPriceFromComparePrices(item, token);
                         if (price > 0)
                         {
@@ -84,14 +84,14 @@ namespace AutomarketPro.Automation
                     }
                 }
                 
-                await Task.Delay(100, token);
+                await Task.Delay(60, token);
                 
                 nint retainerSellPtr = nint.Zero;
                 bool retainerSellReady = false;
                 
                 for (int attempts = 0; attempts < 30; attempts++)
                 {
-                    await Task.Delay(100, token);
+                    await Task.Delay(60, token);
                     
                     unsafe
                     {
@@ -224,7 +224,7 @@ namespace AutomarketPro.Automation
                     agent->OpenForItemSlot(foundType, foundSlot, 0, 0);
                 }
                 
-                await Task.Delay(200, token); // Wait for context menu to appear
+                await Task.Delay(120, token); // Wait for context menu to appear
                 return true;
             }
             catch (Exception ex)
@@ -243,7 +243,7 @@ namespace AutomarketPro.Automation
                 nint contextMenuPtr = nint.Zero;
                 for (int attempts = 0; attempts < 30; attempts++)
                 {
-                    await Task.Delay(100, token);
+                    await Task.Delay(60, token);
                     try
                     {
                         unsafe
@@ -359,7 +359,7 @@ namespace AutomarketPro.Automation
                     };
                     atkUnitBase->FireCallback(3, values, true);
                 }
-                await Task.Delay(300, token);
+                await Task.Delay(180, token);
                 return true;
             }
             catch (Exception ex)
@@ -390,7 +390,7 @@ namespace AutomarketPro.Automation
                 }
                 
                 // Step 3: Wait for and confirm any confirmation dialog
-                await Task.Delay(500, token); // Give time for confirmation dialog to appear
+                await Task.Delay(300, token); // Give time for confirmation dialog to appear
                 
                 // Check for confirmation dialog (SelectYesno)
                 bool confirmationClicked = false;
@@ -422,7 +422,7 @@ namespace AutomarketPro.Automation
                 
                 if (confirmationClicked)
                 {
-                    await Task.Delay(300, token);
+                    await Task.Delay(180, token);
                 }
                 
                 return true;
@@ -443,7 +443,7 @@ namespace AutomarketPro.Automation
                 nint contextMenuPtr = nint.Zero;
                 for (int attempts = 0; attempts < 30; attempts++)
                 {
-                    await Task.Delay(100, token);
+                    await Task.Delay(60, token);
                     try
                     {
                         unsafe
@@ -559,7 +559,7 @@ namespace AutomarketPro.Automation
                     };
                     atkUnitBase->FireCallback(3, values, true);
                 }
-                await Task.Delay(300, token);
+                await Task.Delay(180, token);
                 return true;
             }
             catch (Exception ex)
@@ -576,7 +576,7 @@ namespace AutomarketPro.Automation
             
             for (int attempts = 0; attempts < 40; attempts++)
             {
-                await Task.Delay(100, token);
+                await Task.Delay(60, token);
                 
                 if (token.IsCancellationRequested) break;
                 
@@ -598,7 +598,7 @@ namespace AutomarketPro.Automation
                 catch (Exception ex)
                 {
                     LogError?.Invoke($"[AutoMarket] Error checking ItemSearchResult (attempt {attempts}): {ex.Message}", ex);
-                    await Task.Delay(50, token);
+                    await Task.Delay(30, token);
                     continue;
                 }
             }
@@ -615,12 +615,12 @@ namespace AutomarketPro.Automation
                 return 0;
             }
             
-            await Task.Delay(200, token);
+            await Task.Delay(120, token);
             
             ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ItemSearchResult itemSearch = null;
             for (int attempts = 0; attempts < 40; attempts++)
             {
-                await Task.Delay(100, token);
+                await Task.Delay(60, token);
                 
                 if (token.IsCancellationRequested) break;
                 
@@ -653,14 +653,14 @@ namespace AutomarketPro.Automation
                     catch (Exception ex)
                     {
                         LogError?.Invoke($"[AutoMarket] Error creating ItemSearchResult wrapper (attempt {attempts}): {ex.Message}", ex);
-                        await Task.Delay(50, token);
+                        await Task.Delay(30, token);
                         continue;
                     }
                 }
                 catch (Exception ex)
                 {
                     LogError?.Invoke($"[AutoMarket] Error checking ItemSearchResult (attempt {attempts}): {ex.Message}", ex);
-                    await Task.Delay(50, token);
+                    await Task.Delay(30, token);
                     continue;
                 }
             }
@@ -780,7 +780,7 @@ namespace AutomarketPro.Automation
             return lowestPrice;
         }
         
-        public async Task<bool> CloseRetainerWindow(CancellationToken token)
+        public async Task<bool> CloseRetainerWindow(bool weVendored, CancellationToken token)
         {
             try
             {
@@ -823,6 +823,13 @@ namespace AutomarketPro.Automation
                     await Task.Delay(500, token);
                 }
                 
+                // Handle confirmation dialog that appears when leaving retainer after vendoring
+                // Only check for dialog if we actually vendored items
+                if (weVendored)
+                {
+                    await HandleRetainerLeaveConfirmation(token);
+                }
+                
                 return true;
             }
             catch (Exception ex)
@@ -836,7 +843,7 @@ namespace AutomarketPro.Automation
         /// Closes the retainer UI windows to return to RetainerList (retainer selection).
         /// Closes RetainerSellList and SelectString, but keeps RetainerList open for next retainer selection.
         /// </summary>
-        public async Task<bool> CloseRetainerList(CancellationToken token)
+        public async Task<bool> CloseRetainerList(bool weVendored, CancellationToken token)
         {
             try
             {
@@ -872,6 +879,13 @@ namespace AutomarketPro.Automation
                     await Task.Delay(500, token);
                 }
                 
+                // Handle confirmation dialog that appears when leaving retainer after vendoring
+                // Only check for dialog if we actually vendored items
+                if (weVendored)
+                {
+                    await HandleRetainerLeaveConfirmation(token);
+                }
+                
                 // Verify RetainerList is open and ready (we need it to select the next retainer)
                 bool retainerListReady = false;
                 unsafe
@@ -888,7 +902,7 @@ namespace AutomarketPro.Automation
                 {
                     for (int attempts = 0; attempts < 30; attempts++)
                     {
-                        await Task.Delay(100, token);
+                        await Task.Delay(60, token);
                         
                         unsafe
                         {
@@ -907,6 +921,82 @@ namespace AutomarketPro.Automation
             catch (Exception ex)
             {
                 LogError?.Invoke($"[AutoMarket] Error closing retainer windows: {ex.Message}", ex);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Handles the confirmation dialog that appears when leaving a retainer after vendoring items.
+        /// The dialog says "Your retainer will be unable to process item buyback..." and requires clicking "Yes".
+        /// </summary>
+        private async Task<bool> HandleRetainerLeaveConfirmation(CancellationToken token)
+        {
+            try
+            {
+                // Wait a bit for the dialog to appear after closing the retainer window
+                await Task.Delay(300, token);
+                
+                bool confirmationClicked = false;
+                nint yesnoName = nint.Zero;
+                
+                try
+                {
+                    // Wait for the dialog to appear (up to 2 seconds)
+                    for (int attempts = 0; attempts < 20; attempts++)
+                    {
+                        await Task.Delay(60, token);
+                        
+                        unsafe
+                        {
+                            var raptureMgr = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance();
+                            if (raptureMgr != null)
+                            {
+                                if (yesnoName == nint.Zero)
+                                {
+                                    yesnoName = System.Runtime.InteropServices.Marshal.StringToHGlobalAnsi("SelectYesno");
+                                }
+                                var yesnoBytes = (byte*)yesnoName.ToPointer();
+                                
+                                for (int i = 1; i < 20; i++)
+                                {
+                                    var yesnoAddon = raptureMgr->GetAddonByName(yesnoBytes, i);
+                                    if (yesnoAddon != null && yesnoAddon->IsVisible && ECommons.GenericHelpers.IsAddonReady(yesnoAddon))
+                                    {
+                                        Log?.Invoke("[AutoMarket] Found retainer leave confirmation dialog, clicking Yes...");
+                                        // Click Yes (button index 0)
+                                        ECommons.Automation.Callback.Fire(yesnoAddon, true, 0);
+                                        confirmationClicked = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (confirmationClicked)
+                        {
+                            break;
+                        }
+                    }
+                }
+                finally
+                {
+                    if (yesnoName != nint.Zero)
+                    {
+                        System.Runtime.InteropServices.Marshal.FreeHGlobal(yesnoName);
+                    }
+                }
+                
+                if (confirmationClicked)
+                {
+                    await Task.Delay(300, token); // Wait for dialog to close
+                    Log?.Invoke("[AutoMarket] Confirmed leaving retainer");
+                }
+                
+                return confirmationClicked;
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error handling retainer leave confirmation: {ex.Message}", ex);
                 return false;
             }
         }

@@ -26,6 +26,26 @@ namespace AutomarketPro.Services
         public bool Scanning => IsScanning;
         public event Action? ScanComplete;
         
+        /// <summary>
+        /// Gets the current world name. Returns null if not available yet.
+        /// </summary>
+        public string? CurrentWorldName
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(CachedWorldName))
+                    return CachedWorldName;
+                    
+                // Try to get it fresh if not cached
+                var worldName = GetWorldNameOnMainThread();
+                if (!string.IsNullOrEmpty(worldName))
+                {
+                    CachedWorldName = worldName;
+                }
+                return worldName;
+            }
+        }
+        
         public MarketScanner(AutomarketProPlugin plugin)
         {
             Plugin = plugin;
@@ -84,15 +104,31 @@ namespace AutomarketPro.Services
                 ScannedItems.Clear();
                 CancelToken = new CancellationTokenSource();
                 
+                // Send chat message when scanning starts
+                Plugin?.PrintChat("[AutoMarket] Scanning inventory started...");
+                
                 ScanInventory();
                 
                 if (ScannedItems.Count == 0)
                 {
+                    // Send chat message when scanning completes with no items
+                    Plugin?.PrintChat("[AutoMarket] Scanning complete! No items found.");
                     return true;
                 }
                 
                 await FetchMarketPrices(CancelToken.Token);
                 EvaluateProfitability();
+                
+                // Send chat message when scanning completes successfully
+                if (ScannedItems != null)
+                {
+                    Plugin?.PrintChat($"[AutoMarket] Scanning complete! Found {ScannedItems.Count} items.");
+                }
+                else
+                {
+                    Plugin?.PrintChat("[AutoMarket] Scanning complete!");
+                }
+                
                 ScanComplete?.Invoke();
                 
                 return true;
@@ -271,7 +307,7 @@ namespace AutomarketPro.Services
                         item.MarketPrice = (uint)(item.VendorPrice * 1.5);
                     }
                     
-                    await Task.Delay(200, cancelToken);
+                    await Task.Delay(120, cancelToken);
                 }
                 catch (OperationCanceledException)
                 {
