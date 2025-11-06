@@ -96,16 +96,34 @@ info:
 	fi
 
 # Package plugin for release
+# Usage: make package [RELEASE_TAG=v1.0.0]
+# If RELEASE_TAG is not provided, uses existing DownloadLink URLs
 package: $(BUILD_DLL) $(BUILD_JSON)
 	@echo "📦 Creating release package..."
-	@echo "🕒 Updating repo.json LastUpdate timestamp..."
+	@echo "🕒 Updating repo.json LastUpdate timestamp and AssemblyVersion..."
 	@TIMESTAMP=$$(date +%s); \
 	if command -v jq >/dev/null 2>&1; then \
-		jq '.[0].LastUpdate = '$$TIMESTAMP repo.json > repo.json.tmp && mv repo.json.tmp repo.json; \
+		CURRENT_VERSION=$$(jq -r '.[0].AssemblyVersion' repo.json); \
+		MAJOR=$$(echo $$CURRENT_VERSION | cut -d. -f1); \
+		MINOR=$$(echo $$CURRENT_VERSION | cut -d. -f2); \
+		PATCH=$$(echo $$CURRENT_VERSION | cut -d. -f3); \
+		BUILD=$$(echo $$CURRENT_VERSION | cut -d. -f4); \
+		NEW_BUILD=$$((BUILD + 1)); \
+		NEW_VERSION="$$MAJOR.$$MINOR.$$PATCH.$$NEW_BUILD"; \
+		REPO_URL=$$(jq -r '.[0].RepoUrl' repo.json); \
+		if [ -n "$$RELEASE_TAG" ]; then \
+			DOWNLOAD_URL="$$REPO_URL/releases/download/$$RELEASE_TAG/$(PROJECT_NAME).zip"; \
+			jq --arg ts $$TIMESTAMP --arg ver $$NEW_VERSION --arg url $$DOWNLOAD_URL '.[0].LastUpdate = ($$ts | tonumber) | .[0].AssemblyVersion = $$ver | .[0].DownloadLinkInstall = $$url | .[0].DownloadLinkUpdate = $$url | .[0].DownloadLinkTesting = $$url' repo.json > repo.json.tmp && mv repo.json.tmp repo.json; \
+			echo "✅ Updated LastUpdate to $$TIMESTAMP, AssemblyVersion to $$NEW_VERSION, and DownloadLinks to $$RELEASE_TAG"; \
+		else \
+			jq --arg ts $$TIMESTAMP --arg ver $$NEW_VERSION '.[0].LastUpdate = ($$ts | tonumber) | .[0].AssemblyVersion = $$ver' repo.json > repo.json.tmp && mv repo.json.tmp repo.json; \
+			echo "✅ Updated LastUpdate to $$TIMESTAMP and AssemblyVersion to $$NEW_VERSION"; \
+			echo "⚠️  Note: DownloadLinks unchanged. To update them, run: make package RELEASE_TAG=v1.0.1"; \
+		fi; \
 	else \
 		sed -i.bak "s/\"LastUpdate\": [0-9]*/\"LastUpdate\": $$TIMESTAMP/" repo.json && rm -f repo.json.bak; \
+		echo "✅ Timestamp updated (jq not available, AssemblyVersion not updated)"; \
 	fi
-	@echo "✅ Timestamp updated"
 	@mkdir -p dist
 	@rm -f dist/$(PROJECT_NAME).zip
 	@cd $(BUILD_DIR) && \
