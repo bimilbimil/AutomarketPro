@@ -269,9 +269,90 @@ namespace AutomarketPro.Services
             return "Excalibur";
         }
         
+        /// <summary>
+        /// Gets the data center name from a world name.
+        /// Returns the data center name for Universalis API usage.
+        /// </summary>
+        private string GetDataCenterFromWorld(string worldName)
+        {
+            // Mapping of world names to data center names (as used by Universalis API)
+            var worldToDataCenter = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                // Aether (NA)
+                { "Adamantoise", "Aether" }, { "Cactuar", "Aether" }, { "Faerie", "Aether" },
+                { "Gilgamesh", "Aether" }, { "Jenova", "Aether" }, { "Midgardsormr", "Aether" },
+                { "Sargatanas", "Aether" }, { "Siren", "Aether" },
+                
+                // Primal (NA)
+                { "Behemoth", "Primal" }, { "Excalibur", "Primal" }, { "Exodus", "Primal" },
+                { "Famfrit", "Primal" }, { "Hyperion", "Primal" }, { "Lamia", "Primal" },
+                { "Leviathan", "Primal" }, { "Ultros", "Primal" },
+                
+                // Crystal (NA)
+                { "Balmung", "Crystal" }, { "Brynhildr", "Crystal" }, { "Coeurl", "Crystal" },
+                { "Diabolos", "Crystal" }, { "Goblin", "Crystal" }, { "Malboro", "Crystal" },
+                { "Mateus", "Crystal" }, { "Zalera", "Crystal" },
+                
+                // Chaos (EU)
+                { "Cerberus", "Chaos" }, { "Louisoix", "Chaos" }, { "Moogle", "Chaos" },
+                { "Omega", "Chaos" }, { "Phantom", "Chaos" }, { "Ragnarok", "Chaos" },
+                { "Sagittarius", "Chaos" }, { "Spriggan", "Chaos" },
+                
+                // Light (EU)
+                { "Alpha", "Light" }, { "Lich", "Light" }, { "Odin", "Light" },
+                { "Phoenix", "Light" }, { "Raiden", "Light" }, { "Shiva", "Light" },
+                { "Twintania", "Light" }, { "Zodiark", "Light" },
+                
+                // Elemental (JP)
+                { "Aegis", "Elemental" }, { "Atomos", "Elemental" }, { "Carbuncle", "Elemental" },
+                { "Garuda", "Elemental" }, { "Gungnir", "Elemental" }, { "Kujata", "Elemental" },
+                { "Ramuh", "Elemental" }, { "Tonberry", "Elemental" }, { "Typhon", "Elemental" },
+                { "Unicorn", "Elemental" },
+                
+                // Gaia (JP)
+                { "Alexander", "Gaia" }, { "Bahamut", "Gaia" }, { "Durandal", "Gaia" },
+                { "Fenrir", "Gaia" }, { "Ifrit", "Gaia" }, { "Ridill", "Gaia" },
+                { "Tiamat", "Gaia" }, { "Ultima", "Gaia" }, { "Valefor", "Gaia" },
+                { "Yojimbo", "Gaia" }, { "Zeromus", "Gaia" },
+                
+                // Mana (JP)
+                { "Anima", "Mana" }, { "Asura", "Mana" }, { "Chocobo", "Mana" },
+                { "Hades", "Mana" }, { "Ixion", "Mana" }, { "Masamune", "Mana" },
+                { "Pandaemonium", "Mana" }, { "Shinryu", "Mana" }, { "Titan", "Mana" },
+                
+                // Meteor (JP)
+                { "Belias", "Meteor" }, { "Mandragora", "Meteor" },
+                
+                // Materia (OCE)
+                { "Bismarck", "Materia" }, { "Ravana", "Materia" }, { "Sephirot", "Materia" },
+                { "Sophia", "Materia" }, { "Zurvan", "Materia" },
+                
+                // Dynamis (NA)
+                { "Halicarnassus", "Dynamis" }, { "Maduin", "Dynamis" }, { "Marilith", "Dynamis" },
+                { "Seraph", "Dynamis" }
+            };
+            
+            if (worldToDataCenter.TryGetValue(worldName, out var dataCenter))
+            {
+                return dataCenter;
+            }
+            
+            // Fallback: if world not found, try to return a default based on common patterns
+            // For unknown worlds, default to "Aether" (most common NA data center)
+            LogWarning($"[AutoMarket] Unknown world '{worldName}', defaulting to 'Aether' data center");
+            return "Aether";
+        }
+        
         private async Task FetchMarketPrices(CancellationToken cancelToken)
         {
             string world = CachedWorldName ?? "Excalibur";
+            bool useDataCenter = Plugin.Configuration.DataCenterScan;
+            string location = useDataCenter ? GetDataCenterFromWorld(world) : world;
+            
+            if (useDataCenter)
+            {
+                Log($"[AutoMarket] Using data center scan mode: {location}");
+            }
             
             foreach (var item in ScannedItems)
             {
@@ -281,7 +362,7 @@ namespace AutomarketPro.Services
                 {
                     
                     var hqParam = item.IsHQ ? "?hq=1" : "";
-                    var url = $"https://universalis.app/api/v2/{world}/{item.ItemId}{hqParam}";
+                    var url = $"https://universalis.app/api/v2/{location}/{item.ItemId}{hqParam}";
                     
                     using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancelToken);
                     cts.CancelAfter(TimeSpan.FromSeconds(10));
@@ -291,6 +372,7 @@ namespace AutomarketPro.Services
                     
                     if (data?.listings?.Length > 0)
                     {
+                        // Find the lowest price across the data center (or world)
                         item.MarketPrice = (uint)data.listings
                             .OrderBy(l => l.pricePerUnit)
                             .First().pricePerUnit;

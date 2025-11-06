@@ -321,6 +321,20 @@ namespace AutomarketPro.UI
                     ImGui.EndTabItem();
                 }
                 
+                if (ImGui.BeginTabItem("Ignore"))
+                {
+                    ImGui.Spacing();
+                    try
+                    {
+                        DrawIgnoreTab();
+                    }
+                    catch (Exception ex)
+                    {
+                        ImGui.TextUnformatted($"Error in IgnoreTab: {ex?.Message ?? "Unknown"}");
+                    }
+                    ImGui.EndTabItem();
+                }
+                
                 if (ImGui.BeginTabItem("Settings"))
                 {
                     if (ShowSettingsTab)
@@ -334,20 +348,6 @@ namespace AutomarketPro.UI
                     catch (Exception ex)
                     {
                         ImGui.TextUnformatted($"Error in SettingsTab: {ex?.Message ?? "Unknown"}");
-                    }
-                    ImGui.EndTabItem();
-                }
-                
-                if (ImGui.BeginTabItem("Ignore"))
-                {
-                    ImGui.Spacing();
-                    try
-                    {
-                        DrawIgnoreTab();
-                    }
-                    catch (Exception ex)
-                    {
-                        ImGui.TextUnformatted($"Error in IgnoreTab: {ex?.Message ?? "Unknown"}");
                     }
                     ImGui.EndTabItem();
                 }
@@ -763,6 +763,12 @@ namespace AutomarketPro.UI
                     var autoUndercut = Plugin.Configuration.AutoUndercut;
                     if (ImGui.Checkbox("Auto-undercut lowest price", ref autoUndercut))
                         Plugin.Configuration.AutoUndercut = autoUndercut;
+                    
+                    var dataCenterScan = Plugin.Configuration.DataCenterScan;
+                    if (ImGui.Checkbox("Data Center Scan", ref dataCenterScan))
+                        Plugin.Configuration.DataCenterScan = dataCenterScan;
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("When enabled, scans the entire data center for lowest prices instead of just your world");
                     
                     ImGui.Separator();
                     ImGui.Text("Automation Settings");
