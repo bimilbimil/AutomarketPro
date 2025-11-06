@@ -26,6 +26,9 @@ namespace AutomarketPro.Core
         public bool SkipCollectables { get; set; } = true;
         public bool SkipGear { get; set; } = false;
         
+        // Scanning settings
+        public bool DataCenterScan { get; set; } = false;
+        
         // Ignored items (item IDs that should be excluded from processing)
         public HashSet<uint> IgnoredItemIds { get; set; } = new HashSet<uint>();
         
@@ -57,6 +60,7 @@ namespace AutomarketPro.Core
             SkipHQItems = false;
             SkipCollectables = true;
             SkipGear = false;
+            DataCenterScan = false;
             DebugLogsEnabled = false;
         }
     }
