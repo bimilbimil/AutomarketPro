@@ -98,6 +98,14 @@ info:
 # Package plugin for release
 package: $(BUILD_DLL) $(BUILD_JSON)
 	@echo "📦 Creating release package..."
+	@echo "🕒 Updating repo.json LastUpdate timestamp..."
+	@TIMESTAMP=$$(date +%s); \
+	if command -v jq >/dev/null 2>&1; then \
+		jq '.[0].LastUpdate = '$$TIMESTAMP repo.json > repo.json.tmp && mv repo.json.tmp repo.json; \
+	else \
+		sed -i.bak "s/\"LastUpdate\": [0-9]*/\"LastUpdate\": $$TIMESTAMP/" repo.json && rm -f repo.json.bak; \
+	fi
+	@echo "✅ Timestamp updated"
 	@mkdir -p dist
 	@rm -f dist/$(PROJECT_NAME).zip
 	@cd $(BUILD_DIR) && \
