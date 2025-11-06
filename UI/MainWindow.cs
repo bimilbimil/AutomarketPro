@@ -26,6 +26,7 @@ namespace AutomarketPro.UI
         private bool IgnoreTabScanning = false;
         private DateTime LastIgnoreTabScan = DateTime.MinValue;
         private const int IgnoreTabScanIntervalSeconds = 5; // Scan every 5 seconds
+        private bool IgnoreAllMode = false; // false = "Ignore All", true = "Include All"
         
         // Debug log system - thread-safe collection for messages from anywhere
         private readonly System.Collections.Concurrent.ConcurrentQueue<string> DebugLogMessages = new();
@@ -950,6 +951,36 @@ namespace AutomarketPro.UI
                     {
                         LastIgnoreTabScan = DateTime.MinValue;
                         Task.Run(() => ScanInventoryForIgnoreTab());
+                    }
+                }
+                
+                ImGui.SameLine();
+                
+                // Toggle button: "Ignore All" or "Include All"
+                string toggleButtonText = IgnoreAllMode ? "Include All" : "Ignore All";
+                if (ImGui.Button(toggleButtonText, new Vector2(150, 25)))
+                {
+                    if (!isScanning && IgnoreTabItems.Count > 0)
+                    {
+                        if (IgnoreAllMode)
+                        {
+                            // Include All: Remove all items from ignore list
+                            foreach (var item in IgnoreTabItems)
+                            {
+                                Plugin.Configuration.IgnoredItemIds.Remove(item.ItemId);
+                            }
+                            IgnoreAllMode = false; // Switch back to "Ignore All" mode
+                        }
+                        else
+                        {
+                            // Ignore All: Add all items to ignore list
+                            foreach (var item in IgnoreTabItems)
+                            {
+                                Plugin.Configuration.IgnoredItemIds.Add(item.ItemId);
+                            }
+                            IgnoreAllMode = true; // Switch to "Include All" mode
+                        }
+                        Plugin.Configuration.Save();
                     }
                 }
                 
