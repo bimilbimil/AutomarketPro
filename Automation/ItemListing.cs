@@ -36,135 +36,175 @@ namespace AutomarketPro.Automation
         {
             try
             {
-                if (!await OpenItemContextMenu(item, token))
-                {
-                    LogError?.Invoke($"[AutoMarket] Failed to open context menu for {item.ItemName}", null);
-                    return false;
-                }
-                
-                if (!await ClickPutUpForSale(item, token))
-                {
-                    LogError?.Invoke($"[AutoMarket] Failed to click 'Put Up for Sale' for {item.ItemName}", null);
-                    return false;
-                }
-                
                 uint lowestPrice = item.ListingPrice;
-                await Task.Delay(60, token);
-                
-                // Skip price comparison if Data Center Scan is enabled (we already have the cached price)
                 bool skipComparePrices = Plugin.Configuration.DataCenterScan;
                 
-                bool priceFound = false;
-                if (!skipComparePrices)
+                // Handle items with quantity > 99 by listing in batches
+                int remainingQuantity = item.Quantity;
+                bool firstBatch = true;
+                bool anyBatchSucceeded = false;
+                
+                while (remainingQuantity > 0 && !token.IsCancellationRequested)
                 {
-                    // Only compare prices if Data Center Scan is not enabled
-                    for (int compareAttempt = 0; compareAttempt < 2; compareAttempt++)
+                    // Calculate quantity for this batch (max 99 per listing)
+                    int batchQuantity = Math.Min(99, remainingQuantity);
+                    
+                    if (!firstBatch)
                     {
-                        if (compareAttempt > 0)
+                        Log?.Invoke($"[AutoMarket] Listing remaining {remainingQuantity} of {item.ItemName} (batch: {batchQuantity})");
+                    }
+                    
+                    // Open context menu for the item
+                    if (!await OpenItemContextMenu(item, token))
+                    {
+                        LogError?.Invoke($"[AutoMarket] Failed to open context menu for {item.ItemName}", null);
+                        break; // Exit loop if we can't find the item anymore
+                    }
+                    
+                    if (!await ClickPutUpForSale(item, token))
+                    {
+                        LogError?.Invoke($"[AutoMarket] Failed to click 'Put Up for Sale' for {item.ItemName}", null);
+                        break;
+                    }
+                    
+                    await Task.Delay(60, token);
+                    
+                    // Only do price comparison on first batch (or if not using Data Center Scan)
+                    bool priceFound = false;
+                    if (firstBatch && !skipComparePrices)
+                    {
+                        // Only compare prices if Data Center Scan is not enabled and this is the first batch
+                        for (int compareAttempt = 0; compareAttempt < 2; compareAttempt++)
                         {
-                            await Task.Delay(180, token);
-                        }
-                        
-                        bool clickedCompare = false;
-                        unsafe
-                        {
-                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSellForCompare) 
-                                && ECommons.GenericHelpers.IsAddonReady(&retainerSellForCompare->AtkUnitBase))
+                            if (compareAttempt > 0)
                             {
-                                ECommons.Automation.Callback.Fire(&retainerSellForCompare->AtkUnitBase, true, 4);
-                                clickedCompare = true;
+                                await Task.Delay(180, token);
+                            }
+                            
+                            bool clickedCompare = false;
+                            unsafe
+                            {
+                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSellForCompare) 
+                                    && ECommons.GenericHelpers.IsAddonReady(&retainerSellForCompare->AtkUnitBase))
+                                {
+                                    ECommons.Automation.Callback.Fire(&retainerSellForCompare->AtkUnitBase, true, 4);
+                                    clickedCompare = true;
+                                }
+                            }
+                            
+                            if (clickedCompare)
+                            {
+                                await Task.Delay(180, token);
+                                var price = await GetLowestPriceFromComparePrices(item, token);
+                                if (price > 0)
+                                {
+                                    var undercutAmount = Plugin.Configuration.UndercutAmount;
+                                    lowestPrice = price > undercutAmount ? (uint)(price - undercutAmount) : 1;
+                                    priceFound = true;
+                                    break;
+                                }
                             }
                         }
+                    }
+                    else if (firstBatch && skipComparePrices)
+                    {
+                        // Data Center Scan is enabled - use the cached price from EvaluateProfitability
+                        priceFound = true; // Mark as found since we're using the pre-calculated price
+                        Log?.Invoke($"[AutoMarket] Using cached data center price for {item.ItemName}: {lowestPrice} (skipping compare prices)");
+                    }
+                    else
+                    {
+                        // Subsequent batches - use the same price as first batch
+                        priceFound = true;
+                    }
+                    
+                    await Task.Delay(60, token);
+                    
+                    nint retainerSellPtr = nint.Zero;
+                    bool retainerSellReady = false;
+                    
+                    for (int attempts = 0; attempts < 30; attempts++)
+                    {
+                        await Task.Delay(60, token);
                         
-                        if (clickedCompare)
+                        unsafe
                         {
-                            await Task.Delay(180, token);
-                            var price = await GetLowestPriceFromComparePrices(item, token);
-                            if (price > 0)
+                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var tempRetainerSell) 
+                                && ECommons.GenericHelpers.IsAddonReady(&tempRetainerSell->AtkUnitBase))
                             {
-                                var undercutAmount = Plugin.Configuration.UndercutAmount;
-                                lowestPrice = price > undercutAmount ? (uint)(price - undercutAmount) : 1;
-                                priceFound = true;
+                                retainerSellPtr = (nint)tempRetainerSell;
+                                retainerSellReady = true;
+                                Log?.Invoke($"[AutoMarket] RetainerSell addon is ready (attempt {attempts + 1})");
                                 break;
                             }
                         }
                     }
-                }
-                else
-                {
-                    // Data Center Scan is enabled - use the cached price from EvaluateProfitability
-                    priceFound = true; // Mark as found since we're using the pre-calculated price
-                    Log?.Invoke($"[AutoMarket] Using cached data center price for {item.ItemName}: {lowestPrice} (skipping compare prices)");
-                }
-                
-                await Task.Delay(60, token);
-                
-                nint retainerSellPtr = nint.Zero;
-                bool retainerSellReady = false;
-                
-                for (int attempts = 0; attempts < 30; attempts++)
-                {
-                    await Task.Delay(60, token);
+                    
+                    if (!retainerSellReady)
+                    {
+                        LogError?.Invoke("[AutoMarket] RetainerSell addon not found or not ready after waiting 3 seconds", null);
+                        break;
+                    }
                     
                     unsafe
                     {
-                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var tempRetainerSell) 
-                            && ECommons.GenericHelpers.IsAddonReady(&tempRetainerSell->AtkUnitBase))
+                        try
                         {
-                            retainerSellPtr = (nint)tempRetainerSell;
-                            retainerSellReady = true;
-                            Log?.Invoke($"[AutoMarket] RetainerSell addon is ready (attempt {attempts + 1})");
+                            var retainerSell = (FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell*)retainerSellPtr;
+                            
+                            if (ECommons.GenericHelpers.TryGetAddonByName<AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
+                            {
+                                itemSearchAddon->Close(true);
+                            }
+                            
+                            var ui = &retainerSell->AtkUnitBase;
+                            
+                            if (lowestPrice > 0)
+                            {
+                                retainerSell->AskingPrice->SetValue((int)lowestPrice);
+                                
+                                // Set quantity for this batch (only if > 1)
+                                if (batchQuantity > 1)
+                                {
+                                    retainerSell->Quantity->SetValue(batchQuantity);
+                                }
+                                
+                                ECommons.Automation.Callback.Fire(&retainerSell->AtkUnitBase, true, 0);
+                                ui->Close(true);
+                                
+                                // Successfully listed this batch
+                                remainingQuantity -= batchQuantity;
+                                anyBatchSucceeded = true;
+                                firstBatch = false;
+                                
+                                Log?.Invoke($"[AutoMarket] Listed {batchQuantity} of {item.ItemName} (remaining: {remainingQuantity})");
+                            }
+                            else
+                            {
+                                LogError?.Invoke("[AutoMarket] No price to set", null);
+                                ECommons.Automation.Callback.Fire(&retainerSell->AtkUnitBase, true, 1); // cancel
+                                ui->Close(true);
+                                break;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LogError?.Invoke($"[AutoMarket] Exception setting price and confirming: {ex.Message}", ex);
                             break;
                         }
                     }
-                }
-                
-                if (!retainerSellReady)
-                {
-                    LogError?.Invoke("[AutoMarket] RetainerSell addon not found or not ready after waiting 3 seconds", null);
-                    return false;
-                }
-                
-                unsafe
-                {
-                    try
+                    
+                    // If there's more to list, wait a bit before next batch (outside unsafe block)
+                    if (remainingQuantity > 0)
                     {
-                        var retainerSell = (FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell*)retainerSellPtr;
-                        
-                        if (ECommons.GenericHelpers.TryGetAddonByName<AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
-                        {
-                            itemSearchAddon->Close(true);
-                        }
-                        
-                        var ui = &retainerSell->AtkUnitBase;
-                        
-                        if (lowestPrice > 0)
-                        {
-                            retainerSell->AskingPrice->SetValue((int)lowestPrice);
-                            
-                            if (item.Quantity > 1)
-                            {
-                                retainerSell->Quantity->SetValue(item.Quantity);
-                            }
-                            
-                            ECommons.Automation.Callback.Fire(&retainerSell->AtkUnitBase, true, 0);
-                            ui->Close(true);
-                            return true;
-                        }
-                        else
-                        {
-                            LogError?.Invoke("[AutoMarket] No price to set", null);
-                            ECommons.Automation.Callback.Fire(&retainerSell->AtkUnitBase, true, 1); // cancel
-                            ui->Close(true);
-                            return false;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError?.Invoke($"[AutoMarket] Exception setting price and confirming: {ex.Message}", ex);
-                        return false;
+                        await Task.Delay(300, token); // Delay between batches
                     }
                 }
+                
+                // Update item quantity to reflect what's remaining (should be 0 if all listed successfully)
+                item.Quantity = remainingQuantity;
+                
+                return anyBatchSucceeded;
             }
             catch (Exception ex)
             {
