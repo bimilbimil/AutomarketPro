@@ -853,6 +853,12 @@ namespace AutomarketPro.UI
             if (IgnoreTabScanning) return;
             if ((DateTime.Now - LastIgnoreTabScan).TotalSeconds < IgnoreTabScanIntervalSeconds) return;
             
+            // Safety checks: ensure game is ready before scanning
+            if (Plugin?.ClientState == null || !Plugin.ClientState.IsLoggedIn || Plugin.ClientState.LocalPlayer == null)
+            {
+                return; // Game not ready, skip scan
+            }
+            
             IgnoreTabScanning = true;
             try
             {
@@ -947,7 +953,21 @@ namespace AutomarketPro.UI
                 // Trigger scan if needed (non-blocking)
                 if (shouldScan && !isScanning)
                 {
-                    Task.Run(() => ScanInventoryForIgnoreTab());
+                    // Run on framework thread to avoid race conditions
+                    _ = Task.Run(async () =>
+                    {
+                        await Plugin.Framework.RunOnFrameworkThread(() =>
+                        {
+                            try
+                            {
+                                ScanInventoryForIgnoreTab();
+                            }
+                            catch (Exception ex)
+                            {
+                                LogError("[AutoMarket] Error scanning inventory for Ignore tab", ex);
+                            }
+                        });
+                    });
                 }
                 
                 // Manual refresh button
@@ -956,7 +976,21 @@ namespace AutomarketPro.UI
                     if (!isScanning)
                     {
                         LastIgnoreTabScan = DateTime.MinValue;
-                        Task.Run(() => ScanInventoryForIgnoreTab());
+                        // Run on framework thread to avoid race conditions
+                        _ = Task.Run(async () =>
+                        {
+                            await Plugin.Framework.RunOnFrameworkThread(() =>
+                            {
+                                try
+                                {
+                                    ScanInventoryForIgnoreTab();
+                                }
+                                catch (Exception ex)
+                                {
+                                    LogError("[AutoMarket] Error scanning inventory for Ignore tab", ex);
+                                }
+                            });
+                        });
                     }
                 }
                 
