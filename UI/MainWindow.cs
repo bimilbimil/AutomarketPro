@@ -853,10 +853,22 @@ namespace AutomarketPro.UI
             if (IgnoreTabScanning) return;
             if ((DateTime.Now - LastIgnoreTabScan).TotalSeconds < IgnoreTabScanIntervalSeconds) return;
             
-            // Safety checks: ensure game is ready before scanning
-            if (Plugin?.ClientState == null || !Plugin.ClientState.IsLoggedIn || Plugin.ClientState.LocalPlayer == null)
+            // Check if we're logged in (use fallback to Svc.ClientState if Plugin.ClientState is null)
+            // ClientState can be null during transitions, so we check both
+            bool isLoggedIn = false;
+            if (Plugin?.ClientState != null)
             {
-                return; // Game not ready, skip scan
+                isLoggedIn = Plugin.ClientState.IsLoggedIn;
+            }
+            else if (ECommons.DalamudServices.Svc.ClientState != null)
+            {
+                isLoggedIn = ECommons.DalamudServices.Svc.ClientState.IsLoggedIn;
+            }
+            
+            if (!isLoggedIn)
+            {
+                // Log warning but continue - inventory might still be accessible
+                LogWarning("[AutoMarket] Player may not be logged in - attempting Ignore tab scan anyway");
             }
             
             IgnoreTabScanning = true;
