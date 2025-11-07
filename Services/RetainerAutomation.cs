@@ -232,6 +232,9 @@ namespace AutomarketPro.Services
                     break;
                 }
                 
+                // Store original quantity before listing (in case item is listed in batches)
+                int originalQuantity = item.Quantity;
+                
                 // Try to list the item
                 success = await ItemListing.ListItemOnMarket(item, token);
                 if (!success)
@@ -242,13 +245,16 @@ namespace AutomarketPro.Services
                     continue;
                 }
                 
+                // Successfully listed - calculate how many were actually listed
+                int itemsListed = originalQuantity - item.Quantity; // item.Quantity now contains remaining quantity
+                
                 // Successfully listed - update count
                 profitable.Dequeue();
                 itemsListedThisRetainer++;
-                StatusUpdate?.Invoke($"Listed {item.ItemName ?? "Item#" + item.ItemId} for {item.ListingPrice:N0} gil");
+                StatusUpdate?.Invoke($"Listed {itemsListed} of {item.ItemName ?? "Item#" + item.ItemId} for {item.ListingPrice:N0} gil each");
                 
-                LastRunSummary.ItemsListed++;
-                LastRunSummary.EstimatedRevenue += item.ListingPrice * item.Quantity;
+                LastRunSummary.ItemsListed += itemsListed;
+                LastRunSummary.EstimatedRevenue += item.ListingPrice * itemsListed;
                 
                 // Refresh current listings count after successful listing
                 await Task.Delay(300, token);
