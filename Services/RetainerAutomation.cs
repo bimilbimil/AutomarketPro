@@ -38,6 +38,9 @@ namespace AutomarketPro.Services
             RetainerInteraction.LogError = (msg, ex) => Plugin?.MainWindow?.LogError(msg, ex);
             ItemListing.Log = (msg) => Plugin?.MainWindow?.Log(msg);
             ItemListing.LogError = (msg, ex) => Plugin?.MainWindow?.LogError(msg, ex);
+            
+            // Set up callback for checking retainer listing count (used during batching)
+            ItemListing.GetRetainerListingCount = (index) => RetainerInteraction.GetRetainerMarketItemCount(index);
         }
         
         // Helper methods for logging
@@ -235,8 +238,8 @@ namespace AutomarketPro.Services
                 // Store original quantity before listing (in case item is listed in batches)
                 int originalQuantity = item.Quantity;
                 
-                // Try to list the item
-                success = await ItemListing.ListItemOnMarket(item, token);
+                // Try to list the item (pass retainer index and max listings for limit checking during batching)
+                success = await ItemListing.ListItemOnMarket(item, token, retainerIndex, maxListings);
                 if (!success)
                 {
                     LogError($"[AutoMarket] Failed to list item {item.ItemName} (ID: {item.ItemId})");
@@ -248,13 +251,32 @@ namespace AutomarketPro.Services
                 // Successfully listed - calculate how many were actually listed
                 int itemsListed = originalQuantity - item.Quantity; // item.Quantity now contains remaining quantity
                 
-                // Successfully listed - update count
-                profitable.Dequeue();
-                itemsListedThisRetainer++;
+                // Check if item still has remaining quantity (hit retainer limit during batching)
+                if (item.Quantity > 0)
+                {
+                    // Item was partially listed - keep it in queue for next retainer
+                    Log($"[AutoMarket] Partially listed {item.ItemName}: {itemsListed} listed, {item.Quantity} remaining (retainer {retainerIndex} at limit)");
+                    // Don't dequeue - item stays in queue for next retainer
+                    // Don't increment itemsListedThisRetainer since we're not done with this item
+                }
+                else
+                {
+                    // Fully listed - remove from queue
+                    profitable.Dequeue();
+                    itemsListedThisRetainer++;
+                }
+                
                 StatusUpdate?.Invoke($"Listed {itemsListed} of {item.ItemName ?? "Item#" + item.ItemId} for {item.ListingPrice:N0} gil each");
                 
                 LastRunSummary.ItemsListed += itemsListed;
                 LastRunSummary.EstimatedRevenue += item.ListingPrice * itemsListed;
+                
+                // If item still has remaining quantity, we hit the retainer limit - move to next retainer
+                if (item.Quantity > 0)
+                {
+                    Log($"[AutoMarket] Retainer {retainerIndex} reached listing limit. Moving to next retainer to continue listing {item.ItemName}");
+                    break; // Exit loop to move to next retainer
+                }
                 
                 // Refresh current listings count after successful listing
                 await Task.Delay(300, token);

@@ -329,38 +329,79 @@ namespace AutomarketPro
             }
         }
         
+        /// <summary>
+        /// Safely gets RaptureAtkUnitManager with retry logic (up to 5 attempts).
+        /// Returns null if all attempts fail.
+        /// </summary>
+        private unsafe FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager* GetRaptureAtkUnitManagerSafe()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var manager = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance();
+                    if (manager != null)
+                    {
+                        return manager;
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(10); // Small delay between attempts
+                }
+            }
+            return null;
+        }
+
         private unsafe void Tick(IFramework framework)
         {
             try
             {
                 if (Automation != null && Automation.Running)
                 {
-                    var raptureMgr = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance();
+                    var raptureMgr = GetRaptureAtkUnitManagerSafe();
                     if (raptureMgr != null)
                     {
-                        var talkName = System.Runtime.InteropServices.Marshal.StringToHGlobalAnsi("Talk");
-                        var talkBytes = (byte*)talkName.ToPointer();
-                        
-                        for (int i = 1; i < 20; i++)
+                        nint talkName = nint.Zero;
+                        try
                         {
-                            try
+                            talkName = System.Runtime.InteropServices.Marshal.StringToHGlobalAnsi("Talk");
+                            if (talkName != nint.Zero)
                             {
-                                var talkAddon = raptureMgr->GetAddonByName(talkBytes, i);
-                                if (talkAddon != null && talkAddon->IsVisible && ECommons.GenericHelpers.IsAddonReady(talkAddon))
+                                var talkBytes = (byte*)talkName.ToPointer();
+                                
+                                for (int i = 1; i < 20; i++)
                                 {
                                     try
                                     {
-                                        var talkMaster = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.Talk((nint)talkAddon);
-                                        talkMaster.Click();
+                                        var talkAddon = raptureMgr->GetAddonByName(talkBytes, i);
+                                        if (talkAddon != null && talkAddon->IsVisible && ECommons.GenericHelpers.IsAddonReady(talkAddon))
+                                        {
+                                            try
+                                            {
+                                                var talkMaster = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.Talk((nint)talkAddon);
+                                                talkMaster.Click();
+                                            }
+                                            catch { }
+                                            break; // Found and clicked, exit loop
+                                        }
                                     }
-                                    catch { }
-                                    break; // Found and clicked, exit loop
+                                    catch { continue; }
                                 }
                             }
-                            catch { continue; }
                         }
-                        
-                        System.Runtime.InteropServices.Marshal.FreeHGlobal(talkName);
+                        finally
+                        {
+                            if (talkName != nint.Zero)
+                            {
+                                System.Runtime.InteropServices.Marshal.FreeHGlobal(talkName);
+                            }
+                        }
                     }
                 }
             }

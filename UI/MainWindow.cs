@@ -848,6 +848,35 @@ namespace AutomarketPro.UI
             public int Quantity { get; set; }
         }
         
+        /// <summary>
+        /// Safely gets InventoryManager with retry logic (up to 5 attempts).
+        /// Returns null if all attempts fail.
+        /// </summary>
+        private unsafe InventoryManager* GetInventoryManagerSafe()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var manager = InventoryManager.Instance();
+                    if (manager != null)
+                    {
+                        return manager;
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(10); // Small delay between attempts
+                }
+            }
+            return null;
+        }
+
         private void ScanInventoryForIgnoreTab()
         {
             if (IgnoreTabScanning) return;
@@ -876,7 +905,7 @@ namespace AutomarketPro.UI
             {
                 unsafe
                 {
-                    var inventoryManager = InventoryManager.Instance();
+                    var inventoryManager = GetInventoryManagerSafe();
                     if (inventoryManager == null) return;
                     
                     if (Plugin.DataManager == null) return;

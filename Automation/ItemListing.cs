@@ -27,12 +27,169 @@ namespace AutomarketPro.Automation
         public Action<string>? Log { get; set; }
         public Action<string, Exception?>? LogError { get; set; }
         
+        // Callback to check retainer listing count (set by RetainerAutomation)
+        public Func<int, int>? GetRetainerListingCount { get; set; }
+        
         public ItemListing(AutomarketPro.AutomarketProPlugin plugin)
         {
             Plugin = plugin;
         }
 
-        public async Task<bool> ListItemOnMarket(ScannedItem item, CancellationToken token)
+        /// <summary>
+        /// Safely gets InventoryManager with retry logic (up to 5 attempts).
+        /// Returns null if all attempts fail.
+        /// </summary>
+        private unsafe InventoryManager* GetInventoryManagerSafe()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var manager = InventoryManager.Instance();
+                    if (manager != null)
+                    {
+                        return manager;
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(10); // Small delay between attempts
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Safely gets AgentInventoryContext with retry logic (up to 5 attempts).
+        /// Returns null if all attempts fail.
+        /// </summary>
+        private unsafe AgentInventoryContext* GetAgentInventoryContextSafe()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var agent = AgentInventoryContext.Instance();
+                    if (agent != null)
+                    {
+                        return agent;
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(10); // Small delay between attempts
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Safely gets RaptureAtkUnitManager with retry logic (up to 5 attempts).
+        /// Returns null if all attempts fail.
+        /// </summary>
+        private unsafe FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager* GetRaptureAtkUnitManagerSafe()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var manager = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance();
+                    if (manager != null)
+                    {
+                        return manager;
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(10); // Small delay between attempts
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Safely gets an inventory container with re-validation. Re-validates InventoryManager before each attempt.
+        /// Use this when the operation happens after a delay or in a loop where the pointer might become stale.
+        /// </summary>
+        private unsafe FFXIVClientStructs.FFXIV.Client.Game.InventoryContainer* GetInventoryContainerSafe(InventoryType inventoryType, int maxAttempts = 5)
+        {
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                try
+                {
+                    var inventoryManager = GetInventoryManagerSafe();
+                    if (inventoryManager != null)
+                    {
+                        var container = inventoryManager->GetInventoryContainer(inventoryType);
+                        if (container != null)
+                        {
+                            return container;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < maxAttempts - 1)
+                {
+                    System.Threading.Thread.Sleep(10);
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Safely gets an inventory slot with re-validation. Re-validates InventoryManager and Container before each attempt.
+        /// Use this when the operation happens after a delay or in a loop where the pointer might become stale.
+        /// </summary>
+        private unsafe FFXIVClientStructs.FFXIV.Client.Game.InventoryItem* GetInventorySlotSafe(InventoryType inventoryType, int slot, int maxAttempts = 5)
+        {
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                try
+                {
+                    var container = GetInventoryContainerSafe(inventoryType, 1); // Get container with single attempt (we're already retrying)
+                    if (container != null && slot >= 0 && slot < container->Size)
+                    {
+                        var slotItem = container->GetInventorySlot(slot);
+                        if (slotItem != null)
+                        {
+                            return slotItem;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < maxAttempts - 1)
+                {
+                    System.Threading.Thread.Sleep(10);
+                }
+            }
+            return null;
+        }
+
+
+        public async Task<bool> ListItemOnMarket(ScannedItem item, CancellationToken token, int? retainerIndex = null, int maxListings = 20)
         {
             try
             {
@@ -40,25 +197,97 @@ namespace AutomarketPro.Automation
                 bool skipComparePrices = Plugin.Configuration.DataCenterScan;
                 
                 // Handle items with quantity > 99 by listing in batches
+                int startingQuantity = item.Quantity; // Track starting quantity for debugging
                 int remainingQuantity = item.Quantity;
+                int totalListed = 0; // Track total actually listed
                 bool firstBatch = true;
                 bool anyBatchSucceeded = false;
                 
+                // Track which inventory slot we're currently working with
+                // Start with the slot from the scanned item, but may need to find new stacks as we deplete them
+                InventoryType currentInventoryType = item.InventoryType;
+                int currentInventorySlot = item.InventorySlot;
+                
                 while (remainingQuantity > 0 && !token.IsCancellationRequested)
                 {
-                    // Calculate quantity for this batch (max 99 per listing)
-                    int batchQuantity = Math.Min(99, remainingQuantity);
+                    // Check retainer listing limit before each batch (if retainerIndex is provided)
+                    if (retainerIndex.HasValue && GetRetainerListingCount != null)
+                    {
+                        int currentListings = GetRetainerListingCount(retainerIndex.Value);
+                        if (currentListings >= maxListings)
+                        {
+                            Log?.Invoke($"[AutoMarket] Retainer {retainerIndex.Value} reached max listings ({currentListings}/{maxListings}). Cannot list more batches of {item.ItemName}. Remaining quantity: {remainingQuantity}");
+                            // Update item quantity to reflect what's remaining
+                            item.Quantity = remainingQuantity;
+                            // Update inventory location in case we moved to a different stack
+                            item.InventoryType = currentInventoryType;
+                            item.InventorySlot = currentInventorySlot;
+                            // Return true (partially successful) so item stays in queue for next retainer
+                            return anyBatchSucceeded;
+                        }
+                    }
+                    
+                    // Check actual quantity in current slot before calculating batch quantity
+                    // Use safe wrapper to re-validate pointer (may have changed since last check)
+                    int actualSlotQuantity = 0;
+                    unsafe
+                    {
+                        var slotItem = GetInventorySlotSafe(currentInventoryType, currentInventorySlot);
+                        if (slotItem != null && slotItem->ItemId == item.ItemId)
+                        {
+                            actualSlotQuantity = slotItem->Quantity;
+                        }
+                    }
+                    
+                    // If current slot is empty, find the next stack
+                    if (actualSlotQuantity <= 0)
+                    {
+                        Log?.Invoke($"[AutoMarket] Current slot ({currentInventoryType} slot {currentInventorySlot}) is empty. Finding next stack of {item.ItemName}...");
+                        var (foundType, foundSlot) = FindNextStackOfItem(item, currentInventoryType, currentInventorySlot);
+                        if (foundSlot >= 0)
+                        {
+                            currentInventoryType = foundType;
+                            currentInventorySlot = foundSlot;
+                            Log?.Invoke($"[AutoMarket] Found next stack at {currentInventoryType} slot {currentInventorySlot}");
+                            
+                            // Re-check quantity in the new slot - use safe wrapper to re-validate
+                            unsafe
+                            {
+                                var slotItem = GetInventorySlotSafe(currentInventoryType, currentInventorySlot);
+                                if (slotItem != null && slotItem->ItemId == item.ItemId)
+                                {
+                                    actualSlotQuantity = slotItem->Quantity;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            LogError?.Invoke($"[AutoMarket] No more stacks found for {item.ItemName}. Expected {remainingQuantity} remaining but no stacks available.", null);
+                            break; // Exit loop - no more stacks
+                        }
+                    }
+                    
+                    // Calculate quantity for this batch: min of (99 max per listing, remaining quantity needed, actual quantity in slot)
+                    int batchQuantity = Math.Min(99, Math.Min(remainingQuantity, actualSlotQuantity));
+                    
+                    if (batchQuantity <= 0)
+                    {
+                        LogError?.Invoke($"[AutoMarket] Cannot list batch: batchQuantity={batchQuantity}, remainingQuantity={remainingQuantity}, actualSlotQuantity={actualSlotQuantity}", null);
+                        break;
+                    }
                     
                     if (!firstBatch)
                     {
-                        Log?.Invoke($"[AutoMarket] Listing remaining {remainingQuantity} of {item.ItemName} (batch: {batchQuantity})");
+                        Log?.Invoke($"[AutoMarket] Listing remaining {remainingQuantity} of {item.ItemName} (batch: {batchQuantity} from slot with {actualSlotQuantity})");
                     }
                     
                     // Open context menu for the item
-                    if (!await OpenItemContextMenu(item, token))
+                    bool menuOpened = await OpenItemContextMenuForSlot(item, currentInventoryType, currentInventorySlot, token);
+                    
+                    if (!menuOpened)
                     {
-                        LogError?.Invoke($"[AutoMarket] Failed to open context menu for {item.ItemName}", null);
-                        break; // Exit loop if we can't find the item anymore
+                        LogError?.Invoke($"[AutoMarket] Failed to open context menu for {item.ItemName} at {currentInventoryType} slot {currentInventorySlot}", null);
+                        break; // Exit loop if we can't open the menu
                     }
                     
                     if (!await ClickPutUpForSale(item, token))
@@ -150,7 +379,13 @@ namespace AutomarketPro.Automation
                     {
                         try
                         {
-                            var retainerSell = (FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell*)retainerSellPtr;
+                            // Re-validate RetainerSell addon before use (pointer may have become stale after delays)
+                            if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSell)
+                                || !ECommons.GenericHelpers.IsAddonReady(&retainerSell->AtkUnitBase))
+                            {
+                                LogError?.Invoke("[AutoMarket] RetainerSell addon not found or not ready when trying to set price", null);
+                                break;
+                            }
                             
                             if (ECommons.GenericHelpers.TryGetAddonByName<AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
                             {
@@ -158,32 +393,56 @@ namespace AutomarketPro.Automation
                             }
                             
                             var ui = &retainerSell->AtkUnitBase;
+                            if (ui == null)
+                            {
+                                LogError?.Invoke("[AutoMarket] RetainerSell AtkUnitBase is null", null);
+                                break;
+                            }
                             
                             if (lowestPrice > 0)
                             {
+                                // Null check for AskingPrice before SetValue
+                                if (retainerSell->AskingPrice == null)
+                                {
+                                    LogError?.Invoke("[AutoMarket] RetainerSell AskingPrice is null", null);
+                                    break;
+                                }
+                                
                                 retainerSell->AskingPrice->SetValue((int)lowestPrice);
                                 
                                 // Set quantity for this batch (only if > 1)
                                 if (batchQuantity > 1)
                                 {
+                                    // Null check for Quantity before SetValue
+                                    if (retainerSell->Quantity == null)
+                                    {
+                                        LogError?.Invoke("[AutoMarket] RetainerSell Quantity is null", null);
+                                        break;
+                                    }
+                                    
                                     retainerSell->Quantity->SetValue(batchQuantity);
                                 }
                                 
-                                ECommons.Automation.Callback.Fire(&retainerSell->AtkUnitBase, true, 0);
+                                ECommons.Automation.Callback.Fire(ui, true, 0);
                                 ui->Close(true);
                                 
                                 // Successfully listed this batch
+                                // Subtract the actual quantity we listed (batchQuantity, which is already capped by slot quantity)
                                 remainingQuantity -= batchQuantity;
+                                totalListed += batchQuantity;
                                 anyBatchSucceeded = true;
                                 firstBatch = false;
                                 
-                                Log?.Invoke($"[AutoMarket] Listed {batchQuantity} of {item.ItemName} (remaining: {remainingQuantity})");
+                                Log?.Invoke($"[AutoMarket] Listed {batchQuantity} of {item.ItemName} from slot {currentInventoryType}:{currentInventorySlot} (slot had {actualSlotQuantity}, remaining total: {remainingQuantity}, total listed so far: {totalListed})");
                             }
                             else
                             {
                                 LogError?.Invoke("[AutoMarket] No price to set", null);
-                                ECommons.Automation.Callback.Fire(&retainerSell->AtkUnitBase, true, 1); // cancel
-                                ui->Close(true);
+                                if (ui != null)
+                                {
+                                    ECommons.Automation.Callback.Fire(ui, true, 1); // cancel
+                                    ui->Close(true);
+                                }
                                 break;
                             }
                         }
@@ -194,15 +453,58 @@ namespace AutomarketPro.Automation
                         }
                     }
                     
-                    // If there's more to list, wait a bit before next batch (outside unsafe block)
+                    // If there's more to list, check if current slot is depleted and find next stack if needed
                     if (remainingQuantity > 0)
                     {
                         await Task.Delay(300, token); // Delay between batches
+                        
+                        // Verify current slot still has items, if not find next stack
+                        // Use safe wrapper to re-validate pointer after delay
+                        bool slotDepleted = false;
+                        unsafe
+                        {
+                            var slotItem = GetInventorySlotSafe(currentInventoryType, currentInventorySlot);
+                            if (slotItem == null || slotItem->ItemId != item.ItemId || slotItem->Quantity <= 0)
+                            {
+                                slotDepleted = true;
+                            }
+                        }
+                        
+                        if (slotDepleted)
+                        {
+                            // Current slot is depleted, find next stack
+                            Log?.Invoke($"[AutoMarket] Current slot ({currentInventoryType} slot {currentInventorySlot}) is depleted. Finding next stack...");
+                            var (foundType, foundSlot) = FindNextStackOfItem(item, currentInventoryType, currentInventorySlot);
+                            if (foundSlot >= 0)
+                            {
+                                currentInventoryType = foundType;
+                                currentInventorySlot = foundSlot;
+                                Log?.Invoke($"[AutoMarket] Moving to next stack at {currentInventoryType} slot {currentInventorySlot}");
+                            }
+                            else
+                            {
+                                LogError?.Invoke($"[AutoMarket] No more stacks found for {item.ItemName}. Expected {remainingQuantity} remaining but no stacks available.", null);
+                                break; // Exit loop - no more stacks
+                            }
+                        }
                     }
                 }
                 
                 // Update item quantity to reflect what's remaining (should be 0 if all listed successfully)
                 item.Quantity = remainingQuantity;
+                // Update inventory location in case we moved to a different stack
+                item.InventoryType = currentInventoryType;
+                item.InventorySlot = currentInventorySlot;
+                
+                // Log summary for debugging
+                if (remainingQuantity > 0)
+                {
+                    Log?.Invoke($"[AutoMarket] Listing complete for {item.ItemName}: {remainingQuantity} items remaining (started with {startingQuantity}, listed {totalListed}, math check: {startingQuantity} - {totalListed} = {startingQuantity - totalListed})");
+                }
+                else
+                {
+                    Log?.Invoke($"[AutoMarket] Successfully listed all {item.ItemName} (started with {startingQuantity}, listed {totalListed})");
+                }
                 
                 return anyBatchSucceeded;
             }
@@ -213,19 +515,156 @@ namespace AutomarketPro.Automation
             }
         }
         
+        /// <summary>
+        /// Opens context menu for a specific inventory slot. Verifies the slot has the correct item and quantity.
+        /// </summary>
+        private async Task<bool> OpenItemContextMenuForSlot(ScannedItem item, InventoryType inventoryType, int slot, CancellationToken token)
+        {
+            try
+            {
+                unsafe
+                {
+                    var inventoryManager = GetInventoryManagerSafe();
+                    if (inventoryManager == null)
+                    {
+                        LogError?.Invoke("[AutoMarket] InventoryManager is null after retries", null);
+                        return false;
+                    }
+                    
+                    // Verify the slot has the correct item
+                    var container = inventoryManager->GetInventoryContainer(inventoryType);
+                    if (container == null)
+                    {
+                        LogError?.Invoke($"[AutoMarket] Container {inventoryType} is null", null);
+                        return false;
+                    }
+                    
+                    if (slot < 0 || slot >= container->Size)
+                    {
+                        LogError?.Invoke($"[AutoMarket] Invalid slot {slot} for {inventoryType}", null);
+                        return false;
+                    }
+                    
+                    var slotItem = container->GetInventorySlot(slot);
+                    if (slotItem == null || slotItem->ItemId != item.ItemId)
+                    {
+                        // Slot doesn't have the item (may have been depleted)
+                        return false;
+                    }
+                    
+                    // Check if slot has enough quantity (at least 1)
+                    if (slotItem->Quantity <= 0)
+                    {
+                        return false;
+                    }
+                    
+                    // Open context menu using AgentInventoryContext
+                    var agent = GetAgentInventoryContextSafe();
+                    if (agent == null)
+                    {
+                        LogError?.Invoke("[AutoMarket] AgentInventoryContext is null after retries", null);
+                        return false;
+                    }
+                    
+                    Log?.Invoke($"[AutoMarket] Opening context menu for {item.ItemName} at {inventoryType} slot {slot} (quantity: {slotItem->Quantity})");
+                    agent->OpenForItemSlot(inventoryType, slot, 0, 0);
+                }
+                
+                await Task.Delay(120, token); // Wait for context menu to appear
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error opening context menu for slot: {ex.Message}", null);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Finds the next stack of the same item after the given slot. Returns (InventoryType, slot) or (-1, -1) if not found.
+        /// </summary>
+        private (InventoryType type, int slot) FindNextStackOfItem(ScannedItem item, InventoryType afterType, int afterSlot)
+        {
+            try
+            {
+                unsafe
+                {
+                    InventoryType[] inventoryTypes = {
+                        InventoryType.Inventory1,
+                        InventoryType.Inventory2,
+                        InventoryType.Inventory3,
+                        InventoryType.Inventory4
+                    };
+                    
+                    bool foundAfterSlot = false;
+                    
+                    foreach (var type in inventoryTypes)
+                    {
+                        // Use safe wrapper to re-validate container pointer in each loop iteration
+                        var container = GetInventoryContainerSafe(type, 1); // Single attempt per iteration (we're already in a loop)
+                        if (container == null) continue;
+                        
+                        int startSlot = 0;
+                        // If we're in the same container, start searching after the current slot
+                        if (type == afterType)
+                        {
+                            startSlot = afterSlot + 1;
+                            foundAfterSlot = true;
+                        }
+                        // If we've already passed the afterType container, search from the beginning
+                        else if (foundAfterSlot)
+                        {
+                            startSlot = 0;
+                        }
+                        // Otherwise, skip this container (we haven't reached afterType yet)
+                        else
+                        {
+                            continue;
+                        }
+                        
+                        for (int slot = startSlot; slot < container->Size; slot++)
+                        {
+                            var slotItem = container->GetInventorySlot(slot);
+                            if (slotItem != null && slotItem->ItemId == item.ItemId && slotItem->Quantity > 0)
+                            {
+                                // Found a stack with the same item
+                                return (type, slot);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error finding next stack: {ex.Message}", null);
+            }
+            
+            return (InventoryType.Inventory1, -1);
+        }
+        
         public async Task<bool> OpenItemContextMenu(ScannedItem item, CancellationToken token)
         {
             try
             {
                 Log?.Invoke($"[AutoMarket] Finding item {item.ItemName} (ID: {item.ItemId}) in inventory...");
                 
-                // Find the item in inventory
+                // Use the specific slot from the scanned item if available
+                if (item.InventoryType != InventoryType.Inventory1 || item.InventorySlot >= 0)
+                {
+                    bool opened = await OpenItemContextMenuForSlot(item, item.InventoryType, item.InventorySlot, token);
+                    if (opened)
+                    {
+                        return true;
+                    }
+                }
+                
+                // Fallback: Find the item in inventory (for backwards compatibility)
                 unsafe
                 {
-                    var inventoryManager = InventoryManager.Instance();
+                    var inventoryManager = GetInventoryManagerSafe();
                     if (inventoryManager == null)
                     {
-                        LogError?.Invoke("[AutoMarket] InventoryManager is null", null);
+                        LogError?.Invoke("[AutoMarket] InventoryManager is null after retries", null);
                         return false;
                     }
                     
@@ -241,13 +680,14 @@ namespace AutomarketPro.Automation
                     
                     foreach (var type in inventoryTypes)
                     {
-                        var container = inventoryManager->GetInventoryContainer(type);
+                        // Use safe wrapper to re-validate container pointer in each loop iteration
+                        var container = GetInventoryContainerSafe(type, 1); // Single attempt per iteration
                         if (container == null) continue;
                         
                         for (int slot = 0; slot < container->Size; slot++)
                         {
                             var slotItem = container->GetInventorySlot(slot);
-                            if (slotItem != null && slotItem->ItemId == item.ItemId)
+                            if (slotItem != null && slotItem->ItemId == item.ItemId && slotItem->Quantity > 0)
                             {
                                 foundType = type;
                                 foundSlot = slot;
@@ -266,10 +706,10 @@ namespace AutomarketPro.Automation
                     }
                     
                     // Open context menu using AgentInventoryContext
-                    var agent = AgentInventoryContext.Instance();
+                    var agent = GetAgentInventoryContextSafe();
                     if (agent == null)
                     {
-                        LogError?.Invoke("[AutoMarket] AgentInventoryContext is null", null);
+                        LogError?.Invoke("[AutoMarket] AgentInventoryContext is null after retries", null);
                         return false;
                     }
                     
@@ -447,29 +887,41 @@ namespace AutomarketPro.Automation
                 
                 // Check for confirmation dialog (SelectYesno)
                 bool confirmationClicked = false;
+                nint yesnoName = nint.Zero;
                 unsafe
                 {
-                    // Try to find and confirm SelectYesno dialog if present
-                    var raptureMgr = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance();
-                    if (raptureMgr != null)
+                    try
                     {
-                        var yesnoName = System.Runtime.InteropServices.Marshal.StringToHGlobalAnsi("SelectYesno");
-                        var yesnoBytes = (byte*)yesnoName.ToPointer();
-                        
-                        for (int i = 1; i < 20; i++)
+                        // Try to find and confirm SelectYesno dialog if present
+                        var raptureMgr = GetRaptureAtkUnitManagerSafe();
+                        if (raptureMgr != null)
                         {
-                            var yesnoAddon = raptureMgr->GetAddonByName(yesnoBytes, i);
-                            if (yesnoAddon != null && yesnoAddon->IsVisible && ECommons.GenericHelpers.IsAddonReady(yesnoAddon))
+                            yesnoName = System.Runtime.InteropServices.Marshal.StringToHGlobalAnsi("SelectYesno");
+                            if (yesnoName != nint.Zero)
                             {
-                                Log?.Invoke("[AutoMarket] Found confirmation dialog, clicking Yes...");
-                                // Click Yes (button index 0)
-                                ECommons.Automation.Callback.Fire(yesnoAddon, true, 0);
-                                confirmationClicked = true;
-                                break;
+                                var yesnoBytes = (byte*)yesnoName.ToPointer();
+                                
+                                for (int i = 1; i < 20; i++)
+                                {
+                                    var yesnoAddon = raptureMgr->GetAddonByName(yesnoBytes, i);
+                                    if (yesnoAddon != null && yesnoAddon->IsVisible && ECommons.GenericHelpers.IsAddonReady(yesnoAddon))
+                                    {
+                                        Log?.Invoke("[AutoMarket] Found confirmation dialog, clicking Yes...");
+                                        // Click Yes (button index 0)
+                                        ECommons.Automation.Callback.Fire(yesnoAddon, true, 0);
+                                        confirmationClicked = true;
+                                        break;
+                                    }
+                                }
                             }
                         }
-                        
-                        System.Runtime.InteropServices.Marshal.FreeHGlobal(yesnoName);
+                    }
+                    finally
+                    {
+                        if (yesnoName != nint.Zero)
+                        {
+                            System.Runtime.InteropServices.Marshal.FreeHGlobal(yesnoName);
+                        }
                     }
                 }
                 
@@ -871,7 +1323,11 @@ namespace AutomarketPro.Automation
                 {
                     unsafe
                     {
-                        ((FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)selectAddonPtr)->Close(true);
+                        var selectAddon = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)selectAddonPtr;
+                        if (selectAddon != null)
+                        {
+                            selectAddon->Close(true);
+                        }
                     }
                     await Task.Delay(500, token);
                 }
@@ -1001,25 +1457,28 @@ namespace AutomarketPro.Automation
                         
                         unsafe
                         {
-                            var raptureMgr = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance();
+                            var raptureMgr = GetRaptureAtkUnitManagerSafe();
                             if (raptureMgr != null)
                             {
                                 if (yesnoName == nint.Zero)
                                 {
                                     yesnoName = System.Runtime.InteropServices.Marshal.StringToHGlobalAnsi("SelectYesno");
                                 }
-                                var yesnoBytes = (byte*)yesnoName.ToPointer();
-                                
-                                for (int i = 1; i < 20; i++)
+                                if (yesnoName != nint.Zero)
                                 {
-                                    var yesnoAddon = raptureMgr->GetAddonByName(yesnoBytes, i);
-                                    if (yesnoAddon != null && yesnoAddon->IsVisible && ECommons.GenericHelpers.IsAddonReady(yesnoAddon))
+                                    var yesnoBytes = (byte*)yesnoName.ToPointer();
+                                    
+                                    for (int i = 1; i < 20; i++)
                                     {
-                                        Log?.Invoke("[AutoMarket] Found retainer leave confirmation dialog, clicking Yes...");
-                                        // Click Yes (button index 0)
-                                        ECommons.Automation.Callback.Fire(yesnoAddon, true, 0);
-                                        confirmationClicked = true;
-                                        break;
+                                        var yesnoAddon = raptureMgr->GetAddonByName(yesnoBytes, i);
+                                        if (yesnoAddon != null && yesnoAddon->IsVisible && ECommons.GenericHelpers.IsAddonReady(yesnoAddon))
+                                        {
+                                            Log?.Invoke("[AutoMarket] Found retainer leave confirmation dialog, clicking Yes...");
+                                            // Click Yes (button index 0)
+                                            ECommons.Automation.Callback.Fire(yesnoAddon, true, 0);
+                                            confirmationClicked = true;
+                                            break;
+                                        }
                                     }
                                 }
                             }

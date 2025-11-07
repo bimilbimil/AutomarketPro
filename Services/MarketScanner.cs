@@ -195,12 +195,41 @@ namespace AutomarketPro.Services
             IsScanning = false;
         }
         
+        /// <summary>
+        /// Safely gets InventoryManager with retry logic (up to 5 attempts).
+        /// Returns null if all attempts fail.
+        /// </summary>
+        private unsafe InventoryManager* GetInventoryManagerSafe()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var manager = InventoryManager.Instance();
+                    if (manager != null)
+                    {
+                        return manager;
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(10); // Small delay between attempts
+                }
+            }
+            return null;
+        }
+
         private unsafe void ScanInventory()
         {
-            var inventoryManager = InventoryManager.Instance();
+            var inventoryManager = GetInventoryManagerSafe();
             if (inventoryManager == null || Plugin.DataManager == null)
             {
-                LogError("[AutoMarket] [SCAN] InventoryManager or DataManager is null");
+                LogError("[AutoMarket] [SCAN] InventoryManager is null after retries or DataManager is null");
                 return;
             }
             
