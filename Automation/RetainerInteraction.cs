@@ -29,16 +29,74 @@ namespace AutomarketPro.Automation
         {
             Plugin = plugin;
         }
+
+        /// <summary>
+        /// Safely gets RetainerManager with retry logic (up to 5 attempts).
+        /// Returns null if all attempts fail.
+        /// </summary>
+        private unsafe RetainerManager* GetRetainerManagerSafe()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var manager = RetainerManager.Instance();
+                    if (manager != null)
+                    {
+                        return manager;
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(10); // Small delay between attempts
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Safely gets RaptureAtkUnitManager with retry logic (up to 5 attempts).
+        /// Returns null if all attempts fail.
+        /// </summary>
+        private unsafe FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager* GetRaptureAtkUnitManagerSafe()
+        {
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var manager = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance();
+                    if (manager != null)
+                    {
+                        return manager;
+                    }
+                }
+                catch
+                {
+                    // Continue to next attempt
+                }
+                
+                if (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(10); // Small delay between attempts
+                }
+            }
+            return null;
+        }
         
         public unsafe int GetRetainerCount()
         {
             try
             {
                 // Use RetainerManager.Instance() to access retainer data
-                var retainerManager = RetainerManager.Instance();
+                var retainerManager = GetRetainerManagerSafe();
                 if (retainerManager == null)
                 {
-                    LogError?.Invoke("[AutoMarket] RetainerManager is null", null);
+                    LogError?.Invoke("[AutoMarket] RetainerManager is null after retries", null);
                     return 0;
                 }
                 
@@ -92,10 +150,10 @@ namespace AutomarketPro.Automation
         {
             try
             {
-                var retainerManager = RetainerManager.Instance();
+                var retainerManager = GetRetainerManagerSafe();
                 if (retainerManager == null)
                 {
-                    LogError?.Invoke("[AutoMarket] RetainerManager is null", null);
+                    LogError?.Invoke("[AutoMarket] RetainerManager is null after retries", null);
                     return 0;
                 }
                 
@@ -144,10 +202,10 @@ namespace AutomarketPro.Automation
                     nint retainerListNamePtr = nint.Zero;
                     try
                     {
-                        var raptureMgr = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance();
+                        var raptureMgr = GetRaptureAtkUnitManagerSafe();
                         if (raptureMgr == null)
                         {
-                            LogError?.Invoke("[AutoMarket] RaptureAtkUnitManager is null", null);
+                            LogError?.Invoke("[AutoMarket] RaptureAtkUnitManager is null after retries", null);
                             return false;
                         }
                         
