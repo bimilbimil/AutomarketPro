@@ -98,6 +98,24 @@ namespace AutomarketPro.Services
                     return false;
                 }
                 
+                // Check if we're logged in (use fallback to Svc.ClientState if Plugin.ClientState is null)
+                // ClientState can be null during transitions, so we check both
+                bool isLoggedIn = false;
+                if (Plugin.ClientState != null)
+                {
+                    isLoggedIn = Plugin.ClientState.IsLoggedIn;
+                }
+                else if (Svc.ClientState != null)
+                {
+                    isLoggedIn = Svc.ClientState.IsLoggedIn;
+                }
+                
+                if (!isLoggedIn)
+                {
+                    LogWarning("[AutoMarket] [SCAN] Player may not be logged in - attempting scan anyway");
+                    // Don't return false - let the scan attempt proceed, it will fail gracefully if inventory isn't accessible
+                }
+                
                 if (string.IsNullOrEmpty(CachedWorldName))
                 {
                     CacheWorldName();
@@ -113,7 +131,22 @@ namespace AutomarketPro.Services
                 // Send chat message when scanning starts
                 Plugin?.PrintChat("[AutoMarket] Scanning inventory started...");
                 
-                ScanInventory();
+                // Small delay before first scan to let game fully initialize (prevents crashes on first use)
+                await Task.Delay(500, CancelToken.Token);
+                
+                // Run inventory scan on framework thread to avoid race conditions with UI rendering
+                // This is critical - accessing unsafe memory from background threads can cause crashes
+                await Plugin.Framework.RunOnFrameworkThread(() =>
+                {
+                    try
+                    {
+                        ScanInventory();
+                    }
+                    catch (Exception ex)
+                    {
+                        LogError("[AutoMarket] [SCAN] Error during inventory scan", ex);
+                    }
+                });
                 
                 if (ScannedItems.Count == 0)
                 {
