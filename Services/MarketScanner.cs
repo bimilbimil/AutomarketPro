@@ -21,6 +21,9 @@ namespace AutomarketPro.Services
         private bool IsScanning = false;
         private CancellationTokenSource? CancelToken;
         private string? CachedWorldName = null;
+        // Hashmap to cache lowest data center prices per item ID + HQ status (only used when DataCenterScan is enabled)
+        // Key: (ItemId, IsHQ) -> Value: lowest price
+        private Dictionary<(uint ItemId, bool IsHQ), uint> DataCenterPriceCache = new Dictionary<(uint ItemId, bool IsHQ), uint>();
         
         public IReadOnlyList<ScannedItem> Items => ScannedItems.AsReadOnly();
         public bool Scanning => IsScanning;
@@ -103,6 +106,9 @@ namespace AutomarketPro.Services
                 IsScanning = true;
                 ScannedItems.Clear();
                 CancelToken = new CancellationTokenSource();
+                
+                // Reset data center price cache on every scan
+                DataCenterPriceCache.Clear();
                 
                 // Send chat message when scanning starts
                 Plugin?.PrintChat("[AutoMarket] Scanning inventory started...");
@@ -202,8 +208,15 @@ namespace AutomarketPro.Services
                     var itemData = itemSheet.GetRow(slot->ItemId);
                     if (itemData.RowId == 0) continue;
                     
-                    if (itemData.ItemSearchCategory.RowId == 0 || itemData.IsUntradable) continue;
+                    // Skip untradable items entirely (they can't be sold at all)
+                    if (itemData.IsUntradable) continue;
+                    
+                    // Skip ignored items
                     if (Plugin.Configuration.IgnoredItemIds.Contains(slot->ItemId)) continue;
+                    
+                    // Check if item can be listed on market board
+                    // ItemSearchCategory.RowId == 0 means it can't be listed on MB
+                    bool canBeListedOnMB = itemData.ItemSearchCategory.RowId != 0;
                     
                     var itemName = itemData.Name.ToString();
                     if (string.IsNullOrWhiteSpace(itemName))
@@ -220,13 +233,16 @@ namespace AutomarketPro.Services
                         VendorPrice = itemData.PriceLow,
                         StackSize = itemData.StackSize,
                         InventoryType = type,
-                        InventorySlot = i
+                        InventorySlot = i,
+                        CanBeListedOnMarketBoard = canBeListedOnMB
                     };
                     
                     var existing = ScannedItems.FirstOrDefault(x => x.ItemId == item.ItemId && x.IsHQ == item.IsHQ);
                     if (existing != null)
                     {
                         existing.Quantity += item.Quantity;
+                        // Preserve the market board listing capability (should be same for same item)
+                        existing.CanBeListedOnMarketBoard = item.CanBeListedOnMarketBoard;
                     }
                     else
                     {
@@ -358,6 +374,14 @@ namespace AutomarketPro.Services
             {
                 if (cancelToken.IsCancellationRequested) break;
                 
+                // Skip fetching market prices for items that can't be listed on market board
+                // They will be automatically set to vendor in EvaluateProfitability
+                if (!item.CanBeListedOnMarketBoard)
+                {
+                    item.MarketPrice = 0;
+                    continue;
+                }
+                
                 try
                 {
                     
@@ -373,9 +397,23 @@ namespace AutomarketPro.Services
                     if (data?.listings?.Length > 0)
                     {
                         // Find the lowest price across the data center (or world)
-                        item.MarketPrice = (uint)data.listings
+                        uint lowestPrice = (uint)data.listings
                             .OrderBy(l => l.pricePerUnit)
                             .First().pricePerUnit;
+                        
+                        item.MarketPrice = lowestPrice;
+                        
+                        // Cache the lowest data center price if Data Center Scan is enabled
+                        if (useDataCenter)
+                        {
+                            // Store the lowest price for this ItemId + HQ combination (update if we find a lower price)
+                            var cacheKey = (item.ItemId, item.IsHQ);
+                            if (!DataCenterPriceCache.ContainsKey(cacheKey) || 
+                                DataCenterPriceCache[cacheKey] > lowestPrice)
+                            {
+                                DataCenterPriceCache[cacheKey] = lowestPrice;
+                            }
+                        }
                         
                         if (data.recentHistory?.Length > 0)
                         {
@@ -406,9 +444,46 @@ namespace AutomarketPro.Services
         private void EvaluateProfitability()
         {
             var config = Plugin.Configuration;
+            bool useDataCenter = config.DataCenterScan;
             
             foreach (var item in ScannedItems)
             {
+                // If item cannot be listed on market board, automatically set to vendor
+                if (!item.CanBeListedOnMarketBoard)
+                {
+                    item.MarketPrice = 0;
+                    item.ListingPrice = 0;
+                    item.ProfitPerItem = -(int)item.VendorPrice; // Negative since we can only vendor
+                    item.TotalProfit = -(long)(item.VendorPrice * item.Quantity);
+                    item.IsProfitable = false; // Always vendor items that can't be listed on MB
+                    continue;
+                }
+                
+                // If Data Center Scan is enabled and we have a cached price, use it directly
+                var cacheKey = (item.ItemId, item.IsHQ);
+                if (useDataCenter && DataCenterPriceCache.ContainsKey(cacheKey))
+                {
+                    uint cachedPrice = DataCenterPriceCache[cacheKey];
+                    item.MarketPrice = cachedPrice;
+                    
+                    // Skip price comparison, use cached value directly and apply undercut
+                    if (config.AutoUndercut && cachedPrice > 0)
+                    {
+                        item.ListingPrice = (uint)Math.Max(1, cachedPrice - config.UndercutAmount);
+                    }
+                    else
+                    {
+                        item.ListingPrice = cachedPrice;
+                    }
+                    
+                    var cachedProfitMargin = (int)item.ListingPrice - (int)item.VendorPrice;
+                    item.ProfitPerItem = cachedProfitMargin;
+                    item.TotalProfit = cachedProfitMargin * item.Quantity;
+                    item.IsProfitable = item.TotalProfit > config.MinProfitThreshold;
+                    continue;
+                }
+                
+                // Normal price evaluation (when not using Data Center Scan or cache miss)
                 uint priceForProfitability = item.MarketPrice;
                 bool usingRecentSale = false;
                 

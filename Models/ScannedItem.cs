@@ -18,6 +18,7 @@ namespace AutomarketPro.Models
         public uint StackSize { get; set; }
         public InventoryType InventoryType { get; set; }
         public int InventorySlot { get; set; }
+        public bool CanBeListedOnMarketBoard { get; set; } = true;
     }
 }
 

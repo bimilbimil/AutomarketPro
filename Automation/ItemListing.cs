@@ -51,37 +51,50 @@ namespace AutomarketPro.Automation
                 uint lowestPrice = item.ListingPrice;
                 await Task.Delay(60, token);
                 
+                // Skip price comparison if Data Center Scan is enabled (we already have the cached price)
+                bool skipComparePrices = Plugin.Configuration.DataCenterScan;
+                
                 bool priceFound = false;
-                for (int compareAttempt = 0; compareAttempt < 2; compareAttempt++)
+                if (!skipComparePrices)
                 {
-                    if (compareAttempt > 0)
+                    // Only compare prices if Data Center Scan is not enabled
+                    for (int compareAttempt = 0; compareAttempt < 2; compareAttempt++)
                     {
-                        await Task.Delay(180, token);
-                    }
-                    
-                    bool clickedCompare = false;
-                    unsafe
-                    {
-                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSellForCompare) 
-                            && ECommons.GenericHelpers.IsAddonReady(&retainerSellForCompare->AtkUnitBase))
+                        if (compareAttempt > 0)
                         {
-                            ECommons.Automation.Callback.Fire(&retainerSellForCompare->AtkUnitBase, true, 4);
-                            clickedCompare = true;
+                            await Task.Delay(180, token);
+                        }
+                        
+                        bool clickedCompare = false;
+                        unsafe
+                        {
+                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSellForCompare) 
+                                && ECommons.GenericHelpers.IsAddonReady(&retainerSellForCompare->AtkUnitBase))
+                            {
+                                ECommons.Automation.Callback.Fire(&retainerSellForCompare->AtkUnitBase, true, 4);
+                                clickedCompare = true;
+                            }
+                        }
+                        
+                        if (clickedCompare)
+                        {
+                            await Task.Delay(180, token);
+                            var price = await GetLowestPriceFromComparePrices(item, token);
+                            if (price > 0)
+                            {
+                                var undercutAmount = Plugin.Configuration.UndercutAmount;
+                                lowestPrice = price > undercutAmount ? (uint)(price - undercutAmount) : 1;
+                                priceFound = true;
+                                break;
+                            }
                         }
                     }
-                    
-                    if (clickedCompare)
-                    {
-                        await Task.Delay(180, token);
-                        var price = await GetLowestPriceFromComparePrices(item, token);
-                        if (price > 0)
-                        {
-                            var undercutAmount = Plugin.Configuration.UndercutAmount;
-                            lowestPrice = price > undercutAmount ? (uint)(price - undercutAmount) : 1;
-                            priceFound = true;
-                            break;
-                        }
-                    }
+                }
+                else
+                {
+                    // Data Center Scan is enabled - use the cached price from EvaluateProfitability
+                    priceFound = true; // Mark as found since we're using the pre-calculated price
+                    Log?.Invoke($"[AutoMarket] Using cached data center price for {item.ItemName}: {lowestPrice} (skipping compare prices)");
                 }
                 
                 await Task.Delay(60, token);
