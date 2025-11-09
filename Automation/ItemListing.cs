@@ -281,6 +281,9 @@ namespace AutomarketPro.Automation
                         Log?.Invoke($"[AutoMarket] Listing remaining {remainingQuantity} of {item.ItemName} (batch: {batchQuantity} from slot with {actualSlotQuantity})");
                     }
                     
+                    // Add delay before opening context menu to ensure UI is stable
+                    await Task.Delay(100, token);
+                    
                     // Open context menu for the item
                     bool menuOpened = await OpenItemContextMenuForSlot(item, currentInventoryType, currentInventorySlot, token);
                     
@@ -289,6 +292,9 @@ namespace AutomarketPro.Automation
                         LogError?.Invoke($"[AutoMarket] Failed to open context menu for {item.ItemName} at {currentInventoryType} slot {currentInventorySlot}", null);
                         break; // Exit loop if we can't open the menu
                     }
+                    
+                    // Add delay after opening context menu to ensure it's fully ready
+                    await Task.Delay(100, token);
                     
                     if (!await ClickPutUpForSale(item, token))
                     {
@@ -516,12 +522,96 @@ namespace AutomarketPro.Automation
         }
         
         /// <summary>
+        /// Closes any existing context menu to prevent conflicts when opening a new one.
+        /// </summary>
+        private unsafe bool CloseExistingContextMenu()
+        {
+            try
+            {
+                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                {
+                    if (ECommons.GenericHelpers.IsAddonReady(&contextMenuAddon->AtkUnitBase))
+                    {
+                        // Close the existing context menu by pressing Escape or clicking outside
+                        contextMenuAddon->AtkUnitBase.Close(true);
+                        return true;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore errors when trying to close context menu
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Verifies that the retainer UI is in a valid state before opening context menus.
+        /// </summary>
+        private unsafe bool IsRetainerUIReady()
+        {
+            try
+            {
+                // Check if RetainerSellList is open and ready (the main retainer inventory window)
+                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RetainerSellList", out var retainerSellList))
+                {
+                    if (ECommons.GenericHelpers.IsAddonReady(retainerSellList) && retainerSellList->IsVisible)
+                    {
+                        return true;
+                    }
+                }
+                
+                // Also check if RetainerSell is open (the listing window)
+                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RetainerSell", out var retainerSell))
+                {
+                    if (ECommons.GenericHelpers.IsAddonReady(retainerSell) && retainerSell->IsVisible)
+                    {
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Opens context menu for a specific inventory slot. Verifies the slot has the correct item and quantity.
+        /// Includes safety checks to prevent crashes.
         /// </summary>
         private async Task<bool> OpenItemContextMenuForSlot(ScannedItem item, InventoryType inventoryType, int slot, CancellationToken token)
         {
             try
             {
+                // Step 1: Verify retainer UI is ready
+                bool uiReady = false;
+                unsafe
+                {
+                    uiReady = IsRetainerUIReady();
+                }
+                if (!uiReady)
+                {
+                    LogError?.Invoke("[AutoMarket] Retainer UI is not ready - cannot open context menu", null);
+                    return false;
+                }
+                
+                // Step 2: Close any existing context menu to prevent conflicts
+                bool closedMenu = false;
+                unsafe
+                {
+                    closedMenu = CloseExistingContextMenu();
+                }
+                if (closedMenu)
+                {
+                    Log?.Invoke("[AutoMarket] Closed existing context menu before opening new one");
+                    await Task.Delay(100, token); // Small delay after closing
+                }
+                
+                // Step 3: Verify inventory state
+                bool inventoryValid = false;
                 unsafe
                 {
                     var inventoryManager = GetInventoryManagerSafe();
@@ -558,7 +648,18 @@ namespace AutomarketPro.Automation
                         return false;
                     }
                     
-                    // Open context menu using AgentInventoryContext
+                    inventoryValid = true;
+                }
+                
+                if (!inventoryValid)
+                {
+                    return false;
+                }
+                
+                // Step 4: Verify AgentInventoryContext is in a valid state and open context menu
+                bool agentValid = false;
+                unsafe
+                {
                     var agent = GetAgentInventoryContextSafe();
                     if (agent == null)
                     {
@@ -566,16 +667,74 @@ namespace AutomarketPro.Automation
                         return false;
                     }
                     
-                    Log?.Invoke($"[AutoMarket] Opening context menu for {item.ItemName} at {inventoryType} slot {slot} (quantity: {slotItem->Quantity})");
+                    agentValid = true;
+                    
+                    // Step 5: Add a small delay to ensure UI is stable (before opening)
+                    // We'll do this outside unsafe block
+                    
+                    // Step 6: Double-check that no context menu is open (race condition check)
+                    if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var existingMenu))
+                    {
+                        if (ECommons.GenericHelpers.IsAddonReady(&existingMenu->AtkUnitBase))
+                        {
+                            Log?.Invoke("[AutoMarket] Context menu still open, closing it...");
+                            existingMenu->AtkUnitBase.Close(true);
+                        }
+                    }
+                    
+                    // Step 7: Open context menu using AgentInventoryContext
+                    var inventoryManager = GetInventoryManagerSafe();
+                    if (inventoryManager != null)
+                    {
+                        var container = inventoryManager->GetInventoryContainer(inventoryType);
+                        if (container != null)
+                        {
+                            var slotItem = container->GetInventorySlot(slot);
+                            if (slotItem != null)
+                            {
+                                Log?.Invoke($"[AutoMarket] Opening context menu for {item.ItemName} at {inventoryType} slot {slot} (quantity: {slotItem->Quantity})");
+                            }
+                        }
+                    }
                     agent->OpenForItemSlot(inventoryType, slot, 0, 0);
                 }
                 
-                await Task.Delay(120, token); // Wait for context menu to appear
-                return true;
+                if (!agentValid)
+                {
+                    return false;
+                }
+                
+                // Step 5: Add a small delay to ensure UI is stable (after opening)
+                await Task.Delay(50, token);
+                
+                // Step 6 delay: If we closed a menu, wait a bit
+                // (Already handled in Step 6 above, but add delay here too)
+                await Task.Delay(50, token);
+                
+                // Step 8: Wait for context menu to appear with validation
+                for (int attempts = 0; attempts < 10; attempts++)
+                {
+                    await Task.Delay(30, token);
+                    
+                    unsafe
+                    {
+                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                        {
+                            if (ECommons.GenericHelpers.IsAddonReady(&contextMenuAddon->AtkUnitBase))
+                            {
+                                Log?.Invoke($"[AutoMarket] Context menu opened successfully (attempt {attempts + 1})");
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                LogError?.Invoke("[AutoMarket] Context menu did not appear after opening", null);
+                return false;
             }
             catch (Exception ex)
             {
-                LogError?.Invoke($"[AutoMarket] Error opening context menu for slot: {ex.Message}", null);
+                LogError?.Invoke($"[AutoMarket] Error opening context menu for slot: {ex.Message}", ex);
                 return false;
             }
         }
@@ -659,6 +818,9 @@ namespace AutomarketPro.Automation
                 }
                 
                 // Fallback: Find the item in inventory (for backwards compatibility)
+                InventoryType foundType = InventoryType.Inventory1;
+                int foundSlot = -1;
+                
                 unsafe
                 {
                     var inventoryManager = GetInventoryManagerSafe();
@@ -674,9 +836,6 @@ namespace AutomarketPro.Automation
                         InventoryType.Inventory3,
                         InventoryType.Inventory4
                     };
-                    
-                    InventoryType foundType = InventoryType.Inventory1;
-                    int foundSlot = -1;
                     
                     foreach (var type in inventoryTypes)
                     {
@@ -698,14 +857,41 @@ namespace AutomarketPro.Automation
                         
                         if (foundSlot >= 0) break;
                     }
-                    
-                    if (foundSlot < 0)
-                    {
-                        LogError?.Invoke($"[AutoMarket] Item {item.ItemName} not found in inventory", null);
-                        return false;
-                    }
-                    
-                    // Open context menu using AgentInventoryContext
+                }
+                
+                if (foundSlot < 0)
+                {
+                    LogError?.Invoke($"[AutoMarket] Item {item.ItemName} not found in inventory", null);
+                    return false;
+                }
+                
+                // Verify retainer UI is ready before opening context menu
+                bool uiReady = false;
+                unsafe
+                {
+                    uiReady = IsRetainerUIReady();
+                }
+                if (!uiReady)
+                {
+                    LogError?.Invoke("[AutoMarket] Retainer UI is not ready - cannot open context menu", null);
+                    return false;
+                }
+                
+                // Close any existing context menu
+                bool closedMenu = false;
+                unsafe
+                {
+                    closedMenu = CloseExistingContextMenu();
+                }
+                if (closedMenu)
+                {
+                    await Task.Delay(100, token);
+                }
+                
+                // Open context menu using AgentInventoryContext
+                bool agentValid = false;
+                unsafe
+                {
                     var agent = GetAgentInventoryContextSafe();
                     if (agent == null)
                     {
@@ -713,12 +899,49 @@ namespace AutomarketPro.Automation
                         return false;
                     }
                     
+                    agentValid = true;
+                    
+                    // Double-check no context menu is open
+                    if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var existingMenu))
+                    {
+                        if (ECommons.GenericHelpers.IsAddonReady(&existingMenu->AtkUnitBase))
+                        {
+                            existingMenu->AtkUnitBase.Close(true);
+                        }
+                    }
+                    
                     Log?.Invoke($"[AutoMarket] Opening context menu for item at {foundType} slot {foundSlot}");
                     agent->OpenForItemSlot(foundType, foundSlot, 0, 0);
                 }
                 
-                await Task.Delay(120, token); // Wait for context menu to appear
-                return true;
+                if (!agentValid)
+                {
+                    return false;
+                }
+                
+                // Add delay to ensure UI is stable (after opening)
+                await Task.Delay(50, token);
+                await Task.Delay(50, token);
+                
+                // Wait for context menu to appear with validation
+                for (int attempts = 0; attempts < 10; attempts++)
+                {
+                    await Task.Delay(30, token);
+                    
+                    unsafe
+                    {
+                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                        {
+                            if (ECommons.GenericHelpers.IsAddonReady(&contextMenuAddon->AtkUnitBase))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                LogError?.Invoke("[AutoMarket] Context menu did not appear after opening", null);
+                return false;
             }
             catch (Exception ex)
             {
@@ -734,6 +957,17 @@ namespace AutomarketPro.Automation
                 // Wait for context menu to appear - use RaptureAtkUnitManager like SelectString
                 ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu = null;
                 nint contextMenuPtr = nint.Zero;
+                
+                // First, verify retainer UI is still ready
+                unsafe
+                {
+                    if (!IsRetainerUIReady())
+                    {
+                        LogError?.Invoke("[AutoMarket] Retainer UI is not ready when trying to click Put Up for Sale", null);
+                        return false;
+                    }
+                }
+                
                 for (int attempts = 0; attempts < 30; attempts++)
                 {
                     await Task.Delay(60, token);
@@ -834,12 +1068,26 @@ namespace AutomarketPro.Automation
                 }
                 
                 // Click the entry using FireCallback
-                                unsafe
-                                {
-                    var atkUnitBase = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)contextMenuPtr;
+                unsafe
+                {
+                    // Re-validate context menu is still ready before clicking
+                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                    {
+                        LogError?.Invoke("[AutoMarket] ContextMenu addon not found when trying to click", null);
+                        return false;
+                    }
+                    
+                    var atkUnitBase = &contextMenuAddon->AtkUnitBase;
                     if (atkUnitBase == null || !ECommons.GenericHelpers.IsAddonReady(atkUnitBase))
                     {
                         LogError?.Invoke("[AutoMarket] ContextMenu addon is not ready", null);
+                        return false;
+                    }
+                    
+                    // Verify retainer UI is still ready
+                    if (!IsRetainerUIReady())
+                    {
+                        LogError?.Invoke("[AutoMarket] Retainer UI is not ready when clicking context menu", null);
                         return false;
                     }
                     
@@ -946,6 +1194,17 @@ namespace AutomarketPro.Automation
                 // Wait for context menu to appear - use RaptureAtkUnitManager like SelectString
                 ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu = null;
                 nint contextMenuPtr = nint.Zero;
+                
+                // First, verify retainer UI is still ready
+                unsafe
+                {
+                    if (!IsRetainerUIReady())
+                    {
+                        LogError?.Invoke("[AutoMarket] Retainer UI is not ready when trying to click Have Retainer Sell Items", null);
+                        return false;
+                    }
+                }
+                
                 for (int attempts = 0; attempts < 30; attempts++)
                 {
                     await Task.Delay(60, token);
@@ -1048,10 +1307,24 @@ namespace AutomarketPro.Automation
                 // Click the entry using FireCallback
                 unsafe
                 {
-                    var atkUnitBase = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)contextMenuPtr;
+                    // Re-validate context menu is still ready before clicking
+                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                    {
+                        LogError?.Invoke("[AutoMarket] ContextMenu addon not found when trying to click", null);
+                        return false;
+                    }
+                    
+                    var atkUnitBase = &contextMenuAddon->AtkUnitBase;
                     if (atkUnitBase == null || !ECommons.GenericHelpers.IsAddonReady(atkUnitBase))
                     {
                         LogError?.Invoke("[AutoMarket] ContextMenu addon is not ready", null);
+                        return false;
+                    }
+                    
+                    // Verify retainer UI is still ready
+                    if (!IsRetainerUIReady())
+                    {
+                        LogError?.Invoke("[AutoMarket] Retainer UI is not ready when clicking context menu", null);
                         return false;
                     }
                     
