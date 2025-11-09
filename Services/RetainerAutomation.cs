@@ -220,7 +220,15 @@ namespace AutomarketPro.Services
             }
             
             // Add delay after selecting "Sell items" before starting to list items
-                await Task.Delay(600, token);
+            await Task.Delay(600, token);
+            
+            // Step 2.5: Manage listed items if enabled (before processing inventory items)
+            // This adjusts prices for currently listed items by undercutting the market
+            if (Plugin.Configuration.ManageListedItems)
+            {
+                Log($"[AutoMarket] Adjusting prices for listed items on retainer {retainerIndex}...");
+                await ItemListing.ManageListedItems(retainerIndex, token);
+            }
             
             int itemsListedThisRetainer = 0;
             while (profitable.Count > 0 && itemsListedThisRetainer < itemsToAttempt && !token.IsCancellationRequested)

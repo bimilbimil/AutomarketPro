@@ -585,6 +585,152 @@ namespace AutomarketPro.Services
         public List<ScannedItem> GetProfitableItems() => ScannedItems.Where(i => i.IsProfitable).ToList();
         public List<ScannedItem> GetUnprofitableItems() => ScannedItems.Where(i => !i.IsProfitable).ToList();
         
+        /// <summary>
+        /// Fetches market price for a single item (used for listed item management).
+        /// </summary>
+        public async Task FetchMarketPriceForItem(ScannedItem item, CancellationToken cancelToken)
+        {
+            try
+            {
+                // Skip fetching market prices for items that can't be listed on market board
+                if (!item.CanBeListedOnMarketBoard)
+                {
+                    item.MarketPrice = 0;
+                    return;
+                }
+                
+                string world = CachedWorldName ?? "Excalibur";
+                bool useDataCenter = Plugin.Configuration.DataCenterScan;
+                string location = useDataCenter ? GetDataCenterFromWorld(world) : world;
+                
+                var hqParam = item.IsHQ ? "?hq=1" : "";
+                var url = $"https://universalis.app/api/v2/{location}/{item.ItemId}{hqParam}";
+                
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancelToken);
+                cts.CancelAfter(TimeSpan.FromSeconds(10));
+                
+                var response = await HttpClient.GetStringAsync(url, cts.Token);
+                var data = JsonConvert.DeserializeObject<UniversalisResponse>(response);
+                
+                if (data?.listings?.Length > 0)
+                {
+                    uint lowestPrice = (uint)data.listings
+                        .OrderBy(l => l.pricePerUnit)
+                        .First().pricePerUnit;
+                    
+                    item.MarketPrice = lowestPrice;
+                    
+                    // Cache the lowest data center price if Data Center Scan is enabled
+                    if (useDataCenter)
+                    {
+                        var cacheKey = (item.ItemId, item.IsHQ);
+                        if (!DataCenterPriceCache.ContainsKey(cacheKey) || 
+                            DataCenterPriceCache[cacheKey] > lowestPrice)
+                        {
+                            DataCenterPriceCache[cacheKey] = lowestPrice;
+                        }
+                    }
+                    
+                    if (data.recentHistory?.Length > 0)
+                    {
+                        item.RecentSalePrice = (uint)data.recentHistory
+                            .OrderByDescending(h => h.timestamp)
+                            .First().pricePerUnit;
+                    }
+                }
+                else
+                {
+                    item.MarketPrice = (uint)(item.VendorPrice * 1.5);
+                }
+                
+                await Task.Delay(120, cancelToken);
+            }
+            catch (OperationCanceledException)
+            {
+                item.MarketPrice = item.VendorPrice;
+            }
+            catch (Exception ex)
+            {
+                LogError($"Failed to fetch price for item {item.ItemId}", ex);
+                item.MarketPrice = item.VendorPrice;
+            }
+        }
+        
+        /// <summary>
+        /// Evaluates profitability for a single item (used for listed item management).
+        /// </summary>
+        public void EvaluateProfitabilityForItem(ScannedItem item)
+        {
+            var config = Plugin.Configuration;
+            bool useDataCenter = config.DataCenterScan;
+            
+            // If item cannot be listed on market board, automatically set to vendor
+            if (!item.CanBeListedOnMarketBoard)
+            {
+                item.MarketPrice = 0;
+                item.ListingPrice = 0;
+                item.ProfitPerItem = -(int)item.VendorPrice;
+                item.TotalProfit = -(long)(item.VendorPrice * item.Quantity);
+                item.IsProfitable = false;
+                return;
+            }
+            
+            // If Data Center Scan is enabled and we have a cached price, use it directly
+            var cacheKey = (item.ItemId, item.IsHQ);
+            if (useDataCenter && DataCenterPriceCache.ContainsKey(cacheKey))
+            {
+                uint cachedPrice = DataCenterPriceCache[cacheKey];
+                item.MarketPrice = cachedPrice;
+                
+                if (config.AutoUndercut && cachedPrice > 0)
+                {
+                    item.ListingPrice = (uint)Math.Max(1, cachedPrice - config.UndercutAmount);
+                }
+                else
+                {
+                    item.ListingPrice = cachedPrice;
+                }
+                
+                var cachedProfitMargin = (int)item.ListingPrice - (int)item.VendorPrice;
+                item.ProfitPerItem = cachedProfitMargin;
+                item.TotalProfit = cachedProfitMargin * item.Quantity;
+                item.IsProfitable = item.TotalProfit > config.MinProfitThreshold;
+                return;
+            }
+            
+            // Normal price evaluation
+            uint priceForProfitability = item.MarketPrice;
+            bool usingRecentSale = false;
+            
+            if (item.RecentSalePrice > 0)
+            {
+                bool condition1 = item.RecentSalePrice > item.MarketPrice * 2;
+                bool condition2 = item.MarketPrice < item.VendorPrice * 2 && item.RecentSalePrice > item.VendorPrice + config.MinProfitThreshold;
+                
+                if (condition1 || condition2)
+                {
+                    priceForProfitability = item.RecentSalePrice;
+                    usingRecentSale = true;
+                }
+            }
+            
+            if (config.AutoUndercut && item.MarketPrice > 0)
+            {
+                item.ListingPrice = (uint)Math.Max(1, item.MarketPrice - config.UndercutAmount);
+            }
+            else
+            {
+                item.ListingPrice = item.MarketPrice;
+            }
+            
+            var expectedSalePrice = usingRecentSale ? priceForProfitability : item.ListingPrice;
+            var profitMargin = (int)expectedSalePrice - (int)item.VendorPrice;
+            
+            item.ProfitPerItem = profitMargin;
+            item.TotalProfit = profitMargin * item.Quantity;
+            item.IsProfitable = item.TotalProfit > config.MinProfitThreshold;
+        }
+        
         public void Dispose()
         {
             CancelToken?.Cancel();

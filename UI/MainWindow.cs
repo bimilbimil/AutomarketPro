@@ -383,57 +383,63 @@ namespace AutomarketPro.UI
                 // Quick action buttons
                 if (!Automation.Running)
                 {
-                if (ImGui.Button("[>] Start Full Cycle", new Vector2(130, 25)))
-                {
-                    Task.Run(async () => await Automation.StartFullCycle());
-                }
-                
-                ImGui.SameLine();
-                if (ImGui.Button("[S] Scan Only", new Vector2(100, 25)))
-                {
-                    // Log button click immediately
-                    Log("[AutoMarket] [SCAN] Button clicked - starting scan...");
+                    if (ImGui.Button("[>] Start Full Cycle", new Vector2(130, 25)))
+                    {
+                        Task.Run(async () => await Automation.StartFullCycle());
+                    }
                     
-                    // Run scan in background - catch and log any errors
-                    _ = Task.Run(async () =>
+                    ImGui.SameLine();
+                    if (ImGui.Button("[S] Scan Only", new Vector2(100, 25)))
                     {
-                        try
+                        // Log button click immediately
+                        Log("[AutoMarket] [SCAN] Button clicked - starting scan...");
+                        
+                        // Run scan in background - catch and log any errors
+                        _ = Task.Run(async () =>
                         {
-                            Log("[AutoMarket] [SCAN] Task.Run lambda started");
-                            var result = await Scanner.StartScanning();
-                            Log($"[AutoMarket] [SCAN] StartScanning() returned: {result}");
-                        }
-                        catch (Exception ex)
-                        {
-                            LogError("[AutoMarket] Scan button error", ex);
-                        }
-                    });
-                }
-            }
-            else
-            {
-                if (Automation.Paused)
-                {
-                    if (ImGui.Button("[>] Resume", new Vector2(100, 25)))
-                    {
-                        Automation.PauseAutomation();
+                            try
+                            {
+                                Log("[AutoMarket] [SCAN] Task.Run lambda started");
+                                var result = await Scanner.StartScanning();
+                                Log($"[AutoMarket] [SCAN] StartScanning() returned: {result}");
+                            }
+                            catch (Exception ex)
+                            {
+                                LogError("[AutoMarket] Scan button error", ex);
+                            }
+                        });
                     }
                 }
                 else
                 {
-                    if (ImGui.Button("[||] Pause", new Vector2(100, 25)))
+                    if (ImGui.Button("[X] Stop", new Vector2(130, 25)))
                     {
-                        Automation.PauseAutomation();
+                        Automation.StopAutomation();
+                        Scanner.StopScanning();
+                    }
+                    
+                    ImGui.SameLine();
+                    if (ImGui.Button("[S] Scan Only", new Vector2(100, 25)))
+                    {
+                        // Log button click immediately
+                        Log("[AutoMarket] [SCAN] Button clicked - starting scan...");
+                        
+                        // Run scan in background - catch and log any errors
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                Log("[AutoMarket] [SCAN] Task.Run lambda started");
+                                var result = await Scanner.StartScanning();
+                                Log($"[AutoMarket] [SCAN] StartScanning() returned: {result}");
+                            }
+                            catch (Exception ex)
+                            {
+                                LogError("[AutoMarket] Scan button error", ex);
+                            }
+                        });
                     }
                 }
-                
-                ImGui.SameLine();
-                if (ImGui.Button("[X] Stop", new Vector2(100, 25)))
-                {
-                    Automation.StopAutomation();
-                    Scanner.StopScanning();
-                }
-            }
             
             ImGui.SameLine();
             ImGui.Text("|");
@@ -446,10 +452,7 @@ namespace AutomarketPro.UI
             }
             else if (Automation.Running)
             {
-                if (Automation.Paused)
-                    ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "[||] Paused");
-                else
-                    ImGui.TextColored(new Vector4(0, 1, 0, 1), "[>] Running");
+                ImGui.TextColored(new Vector4(0, 1, 0, 1), "[>] Running");
                 
                 ImGui.SameLine();
                 var safeStatus = string.IsNullOrEmpty(AutomationStatus) ? "Ready" : AutomationStatus;
@@ -681,21 +684,10 @@ namespace AutomarketPro.UI
                     var safeStatus = string.IsNullOrEmpty(AutomationStatus) ? "Ready" : AutomationStatus;
                     SafeText($"Status: {safeStatus}");
                     
-                    if (Automation.Paused)
-                    {
-                        if (ImGui.Button("Resume", new Vector2(100, 30)))
-                            Automation.PauseAutomation();
-                    }
-                    else
-                    {
-                        if (ImGui.Button("Pause", new Vector2(100, 30)))
-                            Automation.PauseAutomation();
-                    }
-                    
-                    ImGui.SameLine();
                     if (ImGui.Button("Stop", new Vector2(100, 30)))
                     {
                         Automation.StopAutomation();
+                        Scanner.StopScanning();
                     }
                 }
                 else
@@ -769,6 +761,12 @@ namespace AutomarketPro.UI
                         Plugin.Configuration.DataCenterScan = dataCenterScan;
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("When enabled, scans the entire data center for lowest prices instead of just your world");
+                    
+                    var manageListedItems = Plugin.Configuration.ManageListedItems;
+                    if (ImGui.Checkbox("Manage Listed Items", ref manageListedItems))
+                        Plugin.Configuration.ManageListedItems = manageListedItems;
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("When enabled, automatically adjusts prices of currently listed items by undercutting the cheapest market price before processing inventory");
                     
                     ImGui.Separator();
                     ImGui.Text("Automation Settings");

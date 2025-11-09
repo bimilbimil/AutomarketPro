@@ -10,8 +10,10 @@ using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using ECommons;
 using AutomarketPro.Models;
+using AutomarketPro.Services;
 using InventoryManager = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager;
 using AgentInventoryContext = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentInventoryContext;
+using AtkValueType = FFXIVClientStructs.FFXIV.Component.GUI.ValueType;
 
 namespace AutomarketPro.Automation
 {
@@ -1364,7 +1366,7 @@ namespace AutomarketPro.Automation
                     {
                         if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
                         {
-                            if (ECommons.GenericHelpers.IsAddonReady(itemSearchAddon))
+                            if (itemSearchAddon != null && ECommons.GenericHelpers.IsAddonReady(itemSearchAddon))
                             {
                                 itemSearchPtr = (nint)itemSearchAddon;
                                 Log?.Invoke("[AutoMarket] Found ItemSearchResult window");
@@ -1381,19 +1383,14 @@ namespace AutomarketPro.Automation
                 }
             }
             
-            if (itemSearchPtr == nint.Zero)
-            {
-                LogError?.Invoke("[AutoMarket] ItemSearchResult window did not appear", null);
-                return 0;
-            }
-            
-            if (itemSearchPtr == nint.Zero)
+            if (itemSearchPtr == nint.Zero || token.IsCancellationRequested)
             {
                 LogError?.Invoke("[AutoMarket] ItemSearchResult window did not appear", null);
                 return 0;
             }
             
             await Task.Delay(120, token);
+            if (token.IsCancellationRequested) return 0;
             
             ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ItemSearchResult itemSearch = null;
             for (int attempts = 0; attempts < 40; attempts++)
@@ -1783,6 +1780,1157 @@ namespace AutomarketPro.Automation
             {
                 LogError?.Invoke($"[AutoMarket] Error handling retainer leave confirmation: {ex.Message}", ex);
                 return false;
+            }
+        }
+        
+        // ============================================
+        // Listed Item Management Methods
+        // ============================================
+        
+        /// <summary>
+        /// Gets all items currently listed on the retainer's market board from RetainerManager.
+        /// Returns a list of ScannedItem objects representing the listed items.
+        /// </summary>
+        public unsafe List<ScannedItem> GetListedItems(int retainerIndex)
+        {
+            var listedItems = new List<ScannedItem>();
+            
+            try
+            {
+                var retainerManager = FFXIVClientStructs.FFXIV.Client.Game.RetainerManager.Instance();
+                if (retainerManager == null)
+                {
+                    Log?.Invoke("[AutoMarket] RetainerManager is null");
+                    return listedItems;
+                }
+                
+                // Find the retainer by index
+                int validRetainerIndex = 0;
+                FFXIVClientStructs.FFXIV.Client.Game.RetainerManager.Retainer* retainer = null;
+                for (int i = 0; i < retainerManager->Retainers.Length; i++)
+                {
+                    var r = retainerManager->Retainers[i];
+                    if (r.RetainerId != 0 && r.Name[0] != 0)
+                    {
+                        if (validRetainerIndex == retainerIndex)
+                        {
+                            retainer = &r;
+                            break;
+                        }
+                        validRetainerIndex++;
+                    }
+                }
+                
+                if (retainer == null)
+                {
+                    LogError?.Invoke($"[AutoMarket] Could not find retainer at index {retainerIndex}", null);
+                    return listedItems;
+                }
+                
+                // Access market items from RetainerManager
+                // Note: Market items are stored in RetainerManager, but we need to access them through the retainer's market data
+                // For now, we'll use the market item count and access items through the UI addon
+                // This is a simplified approach - in practice, we may need to access the RetainerSellList addon's component list
+                
+                int marketItemCount = retainer->MarketItemCount;
+                if (marketItemCount == 0)
+                {
+                    Log?.Invoke("[AutoMarket] Retainer has no market items");
+                    return listedItems;
+                }
+                
+                // Access market items through RetainerSellList addon structure
+                // Try to get the addon and access its component list
+                if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RetainerSellList", out var retainerSellListAddon))
+                {
+                    Log?.Invoke("[AutoMarket] RetainerSellList addon not found - cannot read listed items");
+                    return listedItems;
+                }
+                
+                if (!ECommons.GenericHelpers.IsAddonReady(retainerSellListAddon) || !retainerSellListAddon->IsVisible)
+                {
+                    Log?.Invoke("[AutoMarket] RetainerSellList addon not ready - cannot read listed items");
+                    return listedItems;
+                }
+                
+                // Access the addon's component list to get listed items
+                // RetainerSellList uses a component list structure to display items
+                // We'll iterate through the visible items in the list
+                if (Plugin?.DataManager == null)
+                {
+                    LogError?.Invoke("[AutoMarket] DataManager is null", null);
+                    return listedItems;
+                }
+                
+                var itemSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>();
+                if (itemSheet == null)
+                {
+                    LogError?.Invoke("[AutoMarket] Item sheet is null", null);
+                    return listedItems;
+                }
+                
+                unsafe
+                {
+                    var addonBase = retainerSellListAddon;
+                    if (addonBase != null && addonBase->RootNode != null)
+                    {
+                        FFXIVClientStructs.FFXIV.Component.GUI.AtkComponentList* componentList = null;
+                        
+                        if (addonBase->UldManager.NodeListCount > 10)
+                        {
+                            var node10 = addonBase->UldManager.NodeList[10];
+                            if (node10 != null)
+                            {
+                                var componentNode = (FFXIVClientStructs.FFXIV.Component.GUI.AtkComponentNode*)node10;
+                                if (componentNode != null && componentNode->Component != null)
+                                {
+                                    var list = (FFXIVClientStructs.FFXIV.Component.GUI.AtkComponentList*)componentNode->Component;
+                                    if (list != null && list->ListLength > 0)
+                                    {
+                                        componentList = list;
+                                        Log?.Invoke($"[AutoMarket] Found component list at node 10 with {list->ListLength} entries");
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (componentList == null)
+                        {
+                            for (uint nodeId = 0; nodeId < addonBase->UldManager.NodeListCount && nodeId <= 20; nodeId++)
+                            {
+                                if (nodeId == 10) continue;
+                                var node = addonBase->UldManager.NodeList[nodeId];
+                                if (node == null) continue;
+                                
+                                var componentNode = (FFXIVClientStructs.FFXIV.Component.GUI.AtkComponentNode*)node;
+                                if (componentNode != null && componentNode->Component != null)
+                                {
+                                    var list = (FFXIVClientStructs.FFXIV.Component.GUI.AtkComponentList*)componentNode->Component;
+                                    if (list != null && list->ListLength > 0)
+                                    {
+                                        componentList = list;
+                                        Log?.Invoke($"[AutoMarket] Found component list at node {nodeId} with {list->ListLength} entries");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (componentList != null && componentList->ListLength > 0)
+                        {
+                            // Iterate through the list entries
+                            int entryCount = Math.Min((int)componentList->ListLength, marketItemCount);
+                            
+                            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
+                            {
+                                try
+                                {
+                                    // Get the item renderer for this entry
+                                    // ItemRendererList is an array of ListItem structs
+                                    if (entryIndex >= (int)componentList->ListLength) break;
+                                    
+                                    var listItem = componentList->ItemRendererList[entryIndex];
+                                    var itemRenderer = listItem.AtkComponentListItemRenderer;
+                                    if (itemRenderer == null) continue;
+                                    
+                                    // Extract item data from the renderer's child nodes
+                                    var extractedItem = ExtractItemDataFromListRenderer(itemRenderer, itemSheet, entryIndex);
+                                    
+                                    if (extractedItem != null && extractedItem.ItemId > 0)
+                                    {
+                                        extractedItem.InventorySlot = entryIndex; // Store the market slot index
+                                        listedItems.Add(extractedItem);
+                                        Log?.Invoke($"[AutoMarket] Extracted item {entryIndex + 1}: {extractedItem.ItemName} (ID: {extractedItem.ItemId}, Qty: {extractedItem.Quantity}, Price: {extractedItem.ListingPrice:N0}, HQ: {extractedItem.IsHQ})");
+                                    }
+                                    else
+                                    {
+                                        Log?.Invoke($"[AutoMarket] Could not extract complete data for entry {entryIndex + 1}");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    LogError?.Invoke($"[AutoMarket] Error extracting data from list entry {entryIndex}: {ex.Message}", ex);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Log?.Invoke("[AutoMarket] Could not find component list in RetainerSellList addon");
+                        }
+                    }
+                }
+                
+                // If we couldn't extract items from the component list, create placeholders
+                if (listedItems.Count == 0 && marketItemCount > 0)
+                {
+                    Log?.Invoke("[AutoMarket] Component list parsing failed, creating placeholder entries");
+                    for (int slotIndex = 0; slotIndex < marketItemCount && slotIndex < 20; slotIndex++)
+                    {
+                        var placeholderItem = new ScannedItem
+                        {
+                            ItemId = 0,
+                            ItemName = $"Market Item Slot {slotIndex + 1}",
+                            Quantity = 0,
+                            IsHQ = false,
+                            VendorPrice = 0,
+                            StackSize = 0,
+                            CanBeListedOnMarketBoard = true,
+                            ListingPrice = 0,
+                            InventoryType = InventoryType.Inventory1,
+                            InventorySlot = slotIndex
+                        };
+                        listedItems.Add(placeholderItem);
+                    }
+                }
+                
+                Log?.Invoke($"[AutoMarket] Successfully extracted {listedItems.Count} items from component list (expected {marketItemCount})");
+                
+                Log?.Invoke($"[AutoMarket] Found {listedItems.Count} items listed on retainer market board");
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error getting listed items: {ex.Message}", ex);
+            }
+            
+            return listedItems;
+        }
+        
+        /// <summary>
+        /// Extracts item data from a component list item renderer.
+        /// Traverses the renderer's child nodes to find ItemId, Quantity, Price, and HQ status.
+        /// </summary>
+        private unsafe ScannedItem? ExtractItemDataFromListRenderer(
+            FFXIVClientStructs.FFXIV.Component.GUI.AtkComponentListItemRenderer* itemRenderer,
+            Lumina.Excel.ExcelSheet<Lumina.Excel.Sheets.Item> itemSheet,
+            int entryIndex)
+        {
+            if (itemRenderer == null) return null;
+            
+            var item = new ScannedItem
+            {
+                ItemId = 0,
+                ItemName = $"Market Item {entryIndex + 1}",
+                Quantity = 0,
+                IsHQ = false,
+                VendorPrice = 0,
+                StackSize = 0,
+                CanBeListedOnMarketBoard = true,
+                ListingPrice = 0,
+                InventoryType = InventoryType.Inventory1,
+                InventorySlot = entryIndex
+            };
+            
+            try
+            {
+                // Traverse the item renderer's child nodes
+                // RetainerSellList entries typically have:
+                // - Node 0: Item icon (contains ItemId)
+                // - Node 1: Item name text
+                // - Node 2: Quantity text
+                // - Node 3: Price text
+                // - Node 4+: Other nodes (HQ indicator, etc.)
+                
+                // Access the component base from the item renderer
+                // AtkComponentListItemRenderer extends AtkComponentBase, so we can cast it
+                var componentBase = (FFXIVClientStructs.FFXIV.Component.GUI.AtkComponentBase*)itemRenderer;
+                if (componentBase == null || componentBase->OwnerNode == null) return null;
+                
+                var uldManager = &componentBase->UldManager;
+                if (uldManager == null) return null;
+                
+                // Try to find item icon node and text nodes
+                // RetainerSellList entries have nodes in the UldManager
+                for (int i = 0; i < uldManager->NodeListCount && i < 20; i++)
+                {
+                    var node = uldManager->NodeList[i];
+                    if (node == null) continue;
+                    
+                    // Check if this is an image node (item icon)
+                    if (node->Type == FFXIVClientStructs.FFXIV.Component.GUI.NodeType.Image)
+                    {
+                        var imageNode = node->GetAsAtkImageNode();
+                        if (imageNode != null)
+                        {
+                            // Item icon nodes have the ItemId in the ImageId
+                            // For RetainerSellList, we need to extract ItemId differently
+                            // The ItemId might be stored in the node's data or we need to use a different approach
+                            
+                            // Alternative: Try to get ItemId from the node's parent or from the renderer's data
+                            // For now, we'll try to extract from other nodes
+                        }
+                    }
+                    
+                    // Check if this is a text node that might contain item name, quantity, or price
+                    if (node->Type == FFXIVClientStructs.FFXIV.Component.GUI.NodeType.Text)
+                    {
+                        var textNode = node->GetAsAtkTextNode();
+                        if (textNode != null && textNode->NodeText.StringPtr != null)
+                        {
+                            try
+                            {
+                                var seString = ECommons.GenericHelpers.ReadSeString(&textNode->NodeText);
+                                var text = seString.TextValue;
+                                
+                                if (!string.IsNullOrEmpty(text))
+                                {
+                                    // Try to parse as quantity (usually a number)
+                                    if (uint.TryParse(text.Replace(",", "").Replace(" ", "").Trim(), out uint qty) && qty > 0 && qty < 10000)
+                                    {
+                                        if (item.Quantity == 0) // Only set if not already set
+                                        {
+                                            item.Quantity = (int)qty;
+                                        }
+                                    }
+                                    
+                                    // Try to parse as price (usually a large number with commas)
+                                    if (text.Contains(",") || (text.Length > 3 && uint.TryParse(text.Replace(",", "").Replace(" ", "").Trim(), out uint price) && price > 100))
+                                    {
+                                        var cleanPrice = text.Replace(",", "").Replace(" ", "").Replace("gil", "").Trim();
+                                        if (uint.TryParse(cleanPrice, out uint parsedPrice) && parsedPrice > 0)
+                                        {
+                                            if (item.ListingPrice == 0 || parsedPrice < item.ListingPrice) // Take the first or smallest (might be multiple price nodes)
+                                            {
+                                                item.ListingPrice = parsedPrice;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                
+                // Try to extract ItemId from image nodes
+                // Search through nodes again specifically for ItemId extraction
+                for (int i = 0; i < uldManager->NodeListCount && i < 20; i++)
+                {
+                    var node = uldManager->NodeList[i];
+                    if (node == null) continue;
+                    
+                    if (node->Type == FFXIVClientStructs.FFXIV.Component.GUI.NodeType.Image)
+                    {
+                        var imageNode = node->GetAsAtkImageNode();
+                        if (imageNode != null)
+                        {
+                            // Try to extract ItemId from image node
+                            // The ItemId might be stored in the component's data or we need to use icon ID lookup
+                            // For RetainerSellList, we might need to access the renderer's internal data
+                            // This is complex and may require memory offsets or additional research
+                            
+                            // For now, we'll try to get ItemId from the component's user data if available
+                            // The actual implementation may need to use memory offsets to access the ItemId
+                            // stored in the RetainerSellList component's internal structure
+                        }
+                    }
+                }
+                
+                // If we still don't have ItemId, try to match by name from item sheet
+                // This is a fallback but less reliable
+                if (item.ItemId == 0 && !string.IsNullOrEmpty(item.ItemName) && item.ItemName != $"Market Item {entryIndex + 1}")
+                {
+                    // Try to find item by name in item sheet
+                    // This is expensive but might work as a fallback
+                }
+                
+                // Check for HQ indicator
+                // HQ items typically have a special node or flag
+                // We can check for HQ text in the name or a specific indicator node
+                if (item.ItemName.Contains("HQ") || item.ItemName.Contains("High Quality"))
+                {
+                    item.IsHQ = true;
+                    item.ItemName = item.ItemName.Replace("HQ", "").Replace("High Quality", "").Trim();
+                }
+                
+                // If we have at least quantity or price, return the item (even without ItemId)
+                // The ItemId can be extracted later when clicking on the item
+                if (item.Quantity > 0 || item.ListingPrice > 0)
+                {
+                    return item;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error extracting data from list renderer: {ex.Message}", ex);
+            }
+            
+            return null;
+        }
+        /// <summary>
+        /// Clicks on a listed item in RetainerSellList to open its context menu.
+        /// </summary>
+        private async Task<bool> ClickListedItem(int itemIndex, CancellationToken token)
+        {
+            try
+            {
+                if (token.IsCancellationRequested) return false;
+                
+                unsafe
+                {
+                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RetainerSellList", out var retainerSellList))
+                    {
+                        LogError?.Invoke("[AutoMarket] RetainerSellList addon not found", null);
+                        return false;
+                    }
+                    
+                    if (retainerSellList == null || !ECommons.GenericHelpers.IsAddonReady(retainerSellList) || !retainerSellList->IsVisible)
+                    {
+                        LogError?.Invoke("[AutoMarket] RetainerSellList addon not ready", null);
+                        return false;
+                    }
+                    
+                    if (itemIndex < 0)
+                    {
+                        LogError?.Invoke($"[AutoMarket] Invalid item index: {itemIndex}", null);
+                        return false;
+                    }
+                    
+                    ECommons.Automation.Callback.Fire(retainerSellList, true, 0, itemIndex, 1);
+                }
+                
+                await Task.Delay(200, token);
+                if (token.IsCancellationRequested) return false;
+                
+                bool contextMenuFound = false;
+                for (int attempts = 0; attempts < 10 && !token.IsCancellationRequested; attempts++)
+                {
+                    await Task.Delay(50, token);
+                    unsafe
+                    {
+                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenu))
+                        {
+                            if (contextMenu != null && ECommons.GenericHelpers.IsAddonReady(&contextMenu->AtkUnitBase))
+                            {
+                                contextMenuFound = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (!contextMenuFound)
+                {
+                    LogError?.Invoke("[AutoMarket] Context menu did not appear after clicking listed item", null);
+                    return false;
+                }
+                
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error clicking listed item: {ex.Message}", ex);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Clicks "Adjust Price" from the context menu of a listed item.
+        /// </summary>
+        private async Task<bool> ClickAdjustPrice(CancellationToken token)
+        {
+            try
+            {
+                if (token.IsCancellationRequested) return false;
+                
+                ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu = null;
+                nint contextMenuPtr = nint.Zero;
+                
+                for (int attempts = 0; attempts < 30 && !token.IsCancellationRequested; attempts++)
+                {
+                    await Task.Delay(60, token);
+                    if (token.IsCancellationRequested) return false;
+                    
+                    try
+                    {
+                        unsafe
+                        {
+                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                            {
+                                if (contextMenuAddon != null && ECommons.GenericHelpers.IsAddonReady(&contextMenuAddon->AtkUnitBase))
+                                {
+                                    contextMenuPtr = (nint)contextMenuAddon;
+                                }
+                            }
+                        }
+                        
+                        if (contextMenuPtr != nint.Zero)
+                        {
+                            try
+                            {
+                                contextMenu = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu(contextMenuPtr);
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                LogError?.Invoke($"[AutoMarket] Error creating ContextMenu wrapper: {ex.Message}", null);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                
+                if (contextMenu == null || contextMenuPtr == nint.Zero)
+                {
+                    LogError?.Invoke("[AutoMarket] Context menu not found for Adjust Price", null);
+                    return false;
+                }
+                
+                if (token.IsCancellationRequested) return false;
+                
+                // Get "Adjust Price" text from Addon sheet
+                string adjustPriceText = "Adjust Price";
+                try
+                {
+                    if (Plugin?.DataManager != null)
+                    {
+                        try
+                        {
+                            var addonSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Addon>();
+                            if (addonSheet != null)
+                            {
+                                var row = addonSheet.GetRow(5481); // Common ID for adjust price
+                                if (row.RowId != 0)
+                                {
+                                    var text = row.Text.ToString();
+                                    if (!string.IsNullOrEmpty(text))
+                                    {
+                                        adjustPriceText = text;
+                                    }
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+                
+                // Find "Adjust Price" entry
+                var entries = contextMenu.Entries;
+                if (entries == null)
+                {
+                    LogError?.Invoke("[AutoMarket] Context menu has no entries", null);
+                    return false;
+                }
+                
+                int foundIndex = -1;
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    try
+                    {
+                        var entry = entries[i];
+                        if (!entry.Enabled) continue;
+                        
+                        var entryText = entry.Text;
+                        if (entryText != null && 
+                            (entryText.Equals(adjustPriceText, StringComparison.OrdinalIgnoreCase) ||
+                             entryText.Contains("Adjust Price", StringComparison.OrdinalIgnoreCase) ||
+                             entryText.Contains("Adjust", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            foundIndex = entry.Index;
+                            break;
+                        }
+                    }
+                    catch { continue; }
+                }
+                
+                if (foundIndex < 0)
+                {
+                    LogError?.Invoke("[AutoMarket] Could not find 'Adjust Price' option in context menu", null);
+                    return false;
+                }
+                
+                unsafe
+                {
+                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                    {
+                        LogError?.Invoke("[AutoMarket] ContextMenu addon not found when trying to click", null);
+                        return false;
+                    }
+                    
+                    if (contextMenuAddon == null)
+                    {
+                        LogError?.Invoke("[AutoMarket] ContextMenu addon is null", null);
+                        return false;
+                    }
+                    
+                    var atkUnitBase = &contextMenuAddon->AtkUnitBase;
+                    if (atkUnitBase == null || !ECommons.GenericHelpers.IsAddonReady(atkUnitBase))
+                    {
+                        LogError?.Invoke("[AutoMarket] ContextMenu addon is not ready", null);
+                        return false;
+                    }
+                    
+                    ECommons.Automation.Callback.Fire(atkUnitBase, true, 0, 0, 0, 0, 0);
+                }
+                
+                await Task.Delay(200, token);
+                if (token.IsCancellationRequested) return false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error clicking Adjust Price: {ex.Message}", ex);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Clicks "Return Items to Inventory" from the context menu of a listed item.
+        /// </summary>
+        private async Task<bool> ClickReturnToInventory(CancellationToken token)
+        {
+            try
+            {
+                ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu = null;
+                nint contextMenuPtr = nint.Zero;
+                
+                // Wait for context menu to appear
+                for (int attempts = 0; attempts < 30; attempts++)
+                {
+                    await Task.Delay(60, token);
+                    try
+                    {
+                        unsafe
+                        {
+                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                            {
+                                if (ECommons.GenericHelpers.IsAddonReady(&contextMenuAddon->AtkUnitBase))
+                                {
+                                    contextMenuPtr = (nint)contextMenuAddon;
+                                }
+                            }
+                        }
+                        
+                        if (contextMenuPtr != nint.Zero)
+                        {
+                            try
+                            {
+                                contextMenu = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu(contextMenuPtr);
+                                break;
+                            }
+                            catch (Exception ex)
+                            {
+                                LogError?.Invoke($"[AutoMarket] Error creating ContextMenu wrapper: {ex.Message}", null);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                
+                if (contextMenu == null || contextMenuPtr == nint.Zero)
+                {
+                    LogError?.Invoke("[AutoMarket] Context menu not found for Return to Inventory", null);
+                    return false;
+                }
+                
+                // Get "Return Items to Inventory" text from Addon sheet
+                string returnText = "Return Items to Inventory";
+                try
+                {
+                    if (Plugin?.DataManager != null)
+                    {
+                        var addonSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Addon>();
+                        if (addonSheet != null)
+                        {
+                            var row = addonSheet.GetRow(5482); // Common ID for return to inventory
+                            if (row.RowId != 0)
+                            {
+                                var text = row.Text.ToString();
+                                if (!string.IsNullOrEmpty(text))
+                                {
+                                    returnText = text;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+                
+                // Find "Return Items to Inventory" entry
+                var entries = contextMenu.Entries;
+                if (entries == null)
+                {
+                    LogError?.Invoke("[AutoMarket] Context menu has no entries", null);
+                    return false;
+                }
+                
+                int foundIndex = -1;
+                for (int i = 0; i < entries.Length; i++)
+                {
+                    try
+                    {
+                        var entry = entries[i];
+                        if (!entry.Enabled) continue;
+                        
+                        var entryText = entry.Text;
+                        if (entryText != null && 
+                            (entryText.Equals(returnText, StringComparison.OrdinalIgnoreCase) ||
+                             entryText.Contains("Return Items to Inventory", StringComparison.OrdinalIgnoreCase) ||
+                             entryText.Contains("Return to Inventory", StringComparison.OrdinalIgnoreCase) ||
+                             entryText.Contains("Return", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            foundIndex = entry.Index;
+                            break;
+                        }
+                    }
+                    catch { continue; }
+                }
+                
+                if (foundIndex < 0)
+                {
+                    LogError?.Invoke("[AutoMarket] Could not find 'Return Items to Inventory' option in context menu", null);
+                    return false;
+                }
+                
+                // Click the entry
+                unsafe
+                {
+                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
+                    {
+                        LogError?.Invoke("[AutoMarket] ContextMenu addon not found when trying to click", null);
+                        return false;
+                    }
+                    
+                    var atkUnitBase = &contextMenuAddon->AtkUnitBase;
+                    if (atkUnitBase == null || !ECommons.GenericHelpers.IsAddonReady(atkUnitBase))
+                    {
+                        LogError?.Invoke("[AutoMarket] ContextMenu addon is not ready", null);
+                        return false;
+                    }
+                    
+                    var values = stackalloc AtkValue[3]
+                    {
+                        new() { Type = AtkValueType.Int, Int = 0 },
+                        new() { Type = AtkValueType.Int, Int = foundIndex },
+                        new() { Type = AtkValueType.Int, Int = 0 }
+                    };
+                    atkUnitBase->FireCallback(3, values, true);
+                }
+                
+                await Task.Delay(500, token); // Wait for items to return to inventory
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error clicking Return to Inventory: {ex.Message}", ex);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Checks if inventory has space for items.
+        /// </summary>
+        private unsafe bool HasInventorySpace(int requiredSlots = 1)
+        {
+            try
+            {
+                var inventoryManager = GetInventoryManagerSafe();
+                if (inventoryManager == null) return false;
+                
+                InventoryType[] inventoryTypes = {
+                    InventoryType.Inventory1,
+                    InventoryType.Inventory2,
+                    InventoryType.Inventory3,
+                    InventoryType.Inventory4
+                };
+                
+                int freeSlots = 0;
+                foreach (var type in inventoryTypes)
+                {
+                    var container = inventoryManager->GetInventoryContainer(type);
+                    if (container == null) continue;
+                    
+                    for (int i = 0; i < container->Size; i++)
+                    {
+                        var slot = container->GetInventorySlot(i);
+                        if (slot == null || slot->ItemId == 0)
+                        {
+                            freeSlots++;
+                        }
+                    }
+                }
+                
+                return freeSlots >= requiredSlots;
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error checking inventory space: {ex.Message}", ex);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Manages listed items on the retainer's market board.
+        /// Adjusts prices for each listed item by undercutting the cheapest market price using Compare Price.
+        /// </summary>
+        public async Task ManageListedItems(int retainerIndex, CancellationToken token)
+        {
+            try
+            {
+                if (!Plugin.Configuration.ManageListedItems)
+                {
+                    return;
+                }
+                
+                Log?.Invoke("[AutoMarket] Starting price adjustment for listed items...");
+                
+                // Wait for RetainerSellList to be ready
+                bool retainerSellListReady = false;
+                for (int attempts = 0; attempts < 30; attempts++)
+                {
+                    await Task.Delay(100, token);
+                    
+                    unsafe
+                    {
+                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RetainerSellList", out var retainerSellList))
+                        {
+                            if (ECommons.GenericHelpers.IsAddonReady(retainerSellList) && retainerSellList->IsVisible)
+                            {
+                                retainerSellListReady = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (!retainerSellListReady)
+                {
+                    LogError?.Invoke("[AutoMarket] RetainerSellList not ready for listed item management", null);
+                    return;
+                }
+                
+                // Get all listed items
+                var listedItems = GetListedItems(retainerIndex);
+                if (listedItems.Count == 0)
+                {
+                    Log?.Invoke("[AutoMarket] No items listed on retainer market board");
+                    return;
+                }
+                
+                Log?.Invoke($"[AutoMarket] Adjusting prices for {listedItems.Count} listed items...");
+                
+                // Process each listed item
+                for (int i = 0; i < listedItems.Count && !token.IsCancellationRequested; i++)
+                {
+                    var listedItem = listedItems[i];
+                    
+                    Log?.Invoke($"[AutoMarket] Processing listed item {i + 1}/{listedItems.Count} (slot {i})");
+                    
+                    if (token.IsCancellationRequested) break;
+                    if (!await ClickListedItem(i, token))
+                    {
+                        LogError?.Invoke($"[AutoMarket] Failed to click listed item at slot {i + 1}", null);
+                        continue;
+                    }
+                    
+                    if (!await ClickAdjustPrice(token))
+                    {
+                        LogError?.Invoke($"[AutoMarket] Failed to click Adjust Price for slot {i + 1}", null);
+                        continue;
+                    }
+                    
+                    await Task.Delay(200, token);
+                    if (token.IsCancellationRequested) break;
+                    
+                    bool uiReady = false;
+                    unsafe
+                    {
+                        uiReady = IsRetainerUIReady();
+                    }
+                    if (!uiReady)
+                    {
+                        LogError?.Invoke("[AutoMarket] Retainer UI is not ready before Compare Price", null);
+                        continue;
+                    }
+                    
+                    uint cheapestPrice = 0;
+                    var dummyItem = new ScannedItem { ItemName = $"Slot {i + 1}" };
+                    
+                    try
+                    {
+                        for (int compareAttempt = 0; compareAttempt < 2 && !token.IsCancellationRequested; compareAttempt++)
+                        {
+                            if (compareAttempt > 0)
+                            {
+                                await Task.Delay(180, token);
+                                if (token.IsCancellationRequested) break;
+                            }
+                            
+                            bool closedItemSearch = false;
+                            unsafe
+                            {
+                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
+                                {
+                                    if (itemSearchAddon != null && ECommons.GenericHelpers.IsAddonReady(itemSearchAddon))
+                                    {
+                                        itemSearchAddon->Close(true);
+                                        closedItemSearch = true;
+                                    }
+                                }
+                            }
+                            
+                            if (closedItemSearch)
+                            {
+                                await Task.Delay(100, token);
+                                if (token.IsCancellationRequested) break;
+                            }
+                            
+                            bool clickedCompare = false;
+                            unsafe
+                            {
+                                if (!IsRetainerUIReady())
+                                {
+                                    LogError?.Invoke("[AutoMarket] Retainer UI is not ready when clicking Compare Price", null);
+                                    break;
+                                }
+                                
+                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSell))
+                                {
+                                    if (retainerSell != null && ECommons.GenericHelpers.IsAddonReady(&retainerSell->AtkUnitBase))
+                                    {
+                                        var ui = &retainerSell->AtkUnitBase;
+                                        if (ui != null)
+                                        {
+                                            ECommons.Automation.Callback.Fire(ui, true, 4);
+                                            clickedCompare = true;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            if (clickedCompare)
+                            {
+                                await Task.Delay(180, token);
+                                if (token.IsCancellationRequested) break;
+                                
+                                cheapestPrice = await GetLowestPriceFromComparePrices(dummyItem, token);
+                                if (cheapestPrice > 0)
+                                {
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                LogError?.Invoke($"[AutoMarket] RetainerSell not ready for Compare Price attempt {compareAttempt + 1}", null);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogError?.Invoke($"[AutoMarket] Error during Compare Price retry logic: {ex.Message}", ex);
+                        cheapestPrice = 0;
+                    }
+                    
+                    if (cheapestPrice == 0)
+                    {
+                        LogError?.Invoke($"[AutoMarket] Could not get market price for slot {i + 1} after retries, canceling and skipping...", null);
+                        
+                        try
+                        {
+                            unsafe
+                            {
+                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
+                                {
+                                    if (itemSearchAddon != null && ECommons.GenericHelpers.IsAddonReady(itemSearchAddon))
+                                    {
+                                        itemSearchAddon->Close(true);
+                                    }
+                                }
+                                
+                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSell))
+                                {
+                                    if (retainerSell != null && ECommons.GenericHelpers.IsAddonReady(&retainerSell->AtkUnitBase))
+                                    {
+                                        var ui = &retainerSell->AtkUnitBase;
+                                        if (ui != null)
+                                        {
+                                            ECommons.Automation.Callback.Fire(ui, true, 1);
+                                            ui->Close(true);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LogError?.Invoke($"[AutoMarket] Error cleaning up windows: {ex.Message}", ex);
+                        }
+                        
+                        await Task.Delay(200, token);
+                        continue;
+                    }
+                    
+                    if (token.IsCancellationRequested) break;
+                    
+                    uint newPrice = (uint)Math.Max(1, cheapestPrice - Plugin.Configuration.UndercutAmount);
+                    Log?.Invoke($"[AutoMarket] Cheapest market price: {cheapestPrice:N0}, new undercut price: {newPrice:N0}");
+                    
+                    await SetPriceInRetainerSell(newPrice, 1, token);
+                    Log?.Invoke($"[AutoMarket] Successfully adjusted price to {newPrice:N0}");
+                }
+                
+                Log?.Invoke("[AutoMarket] Listed item price adjustment complete.");
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error managing listed items: {ex.Message}", ex);
+            }
+        }
+        
+        /// <summary>
+        /// Sets price in RetainerSell window (reused from existing listing logic).
+        /// </summary>
+        private async Task<bool> SetPriceInRetainerSell(uint price, int quantity, CancellationToken token)
+        {
+            try
+            {
+                if (token.IsCancellationRequested) return false;
+                
+                nint retainerSellPtr = nint.Zero;
+                bool retainerSellReady = false;
+                
+                for (int attempts = 0; attempts < 30 && !token.IsCancellationRequested; attempts++)
+                {
+                    await Task.Delay(60, token);
+                    if (token.IsCancellationRequested) return false;
+                    
+                    unsafe
+                    {
+                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var tempRetainerSell))
+                        {
+                            if (tempRetainerSell != null && ECommons.GenericHelpers.IsAddonReady(&tempRetainerSell->AtkUnitBase))
+                            {
+                                retainerSellPtr = (nint)tempRetainerSell;
+                                retainerSellReady = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (!retainerSellReady || token.IsCancellationRequested)
+                {
+                    LogError?.Invoke("[AutoMarket] RetainerSell addon not found or not ready when trying to set price", null);
+                    return false;
+                }
+                
+                unsafe
+                {
+                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSell))
+                    {
+                        LogError?.Invoke("[AutoMarket] RetainerSell addon not found when trying to set price", null);
+                        return false;
+                    }
+                    
+                    if (retainerSell == null || !ECommons.GenericHelpers.IsAddonReady(&retainerSell->AtkUnitBase))
+                    {
+                        LogError?.Invoke("[AutoMarket] RetainerSell addon not ready when trying to set price", null);
+                        return false;
+                    }
+                    
+                    if (retainerSell->AskingPrice == null)
+                    {
+                        LogError?.Invoke("[AutoMarket] RetainerSell AskingPrice is null", null);
+                        return false;
+                    }
+                    
+                    retainerSell->AskingPrice->SetValue((int)price);
+                    
+                    if (quantity > 1 && retainerSell->Quantity != null)
+                    {
+                        retainerSell->Quantity->SetValue(quantity);
+                    }
+                    
+                    var ui = &retainerSell->AtkUnitBase;
+                    if (ui == null)
+                    {
+                        LogError?.Invoke("[AutoMarket] RetainerSell AtkUnitBase is null", null);
+                        return false;
+                    }
+                    
+                    ECommons.Automation.Callback.Fire(ui, true, 0);
+                    ui->Close(true);
+                }
+                
+                await Task.Delay(300, token);
+                if (token.IsCancellationRequested) return false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error setting price in RetainerSell: {ex.Message}", ex);
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// Finds an item in inventory by ItemId and HQ status.
+        /// </summary>
+        private Task<ScannedItem?> FindItemInInventory(uint itemId, bool isHQ, CancellationToken token)
+        {
+            try
+            {
+                unsafe
+                {
+                    var inventoryManager = GetInventoryManagerSafe();
+                    if (inventoryManager == null) return null;
+                    
+                    if (Plugin?.DataManager == null) return null;
+                    
+                    var itemSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>();
+                    if (itemSheet == null) return null;
+                    
+                    InventoryType[] inventoryTypes = {
+                        InventoryType.Inventory1,
+                        InventoryType.Inventory2,
+                        InventoryType.Inventory3,
+                        InventoryType.Inventory4
+                    };
+                    
+                    foreach (var type in inventoryTypes)
+                    {
+                        var container = inventoryManager->GetInventoryContainer(type);
+                        if (container == null) continue;
+                        
+                        for (int slot = 0; slot < container->Size; slot++)
+                        {
+                            var slotItem = container->GetInventorySlot(slot);
+                            if (slotItem == null || slotItem->ItemId != itemId) continue;
+                            
+                            bool slotIsHQ = slotItem->Flags.HasFlag(InventoryItem.ItemFlags.HighQuality);
+                            if (slotIsHQ != isHQ) continue;
+                            
+                            var itemData = itemSheet.GetRow(itemId);
+                            if (itemData.RowId == 0) continue;
+                            
+                            var itemName = itemData.Name.ToString();
+                            if (string.IsNullOrWhiteSpace(itemName))
+                            {
+                                itemName = $"Item#{itemId}";
+                            }
+                            
+                            return Task.FromResult<ScannedItem?>(new ScannedItem
+                            {
+                                ItemId = itemId,
+                                ItemName = itemName,
+                                Quantity = slotItem->Quantity,
+                                IsHQ = isHQ,
+                                VendorPrice = itemData.PriceLow,
+                                StackSize = itemData.StackSize,
+                                InventoryType = type,
+                                InventorySlot = slot,
+                                CanBeListedOnMarketBoard = itemData.ItemSearchCategory.RowId != 0
+                            });
+                        }
+                    }
+                }
+                
+                return Task.FromResult<ScannedItem?>(null);
+            }
+            catch (Exception ex)
+            {
+                LogError?.Invoke($"[AutoMarket] Error finding item in inventory: {ex.Message}", ex);
+                return Task.FromResult<ScannedItem?>(null);
             }
         }
     }
