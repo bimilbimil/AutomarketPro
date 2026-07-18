@@ -20,15 +20,8 @@ namespace AutomarketPro.Automation
     /// <summary>
     /// Handles item listing automation - opening context menus, clicking buttons, getting prices, etc.
     /// </summary>
-    public class ItemListing
+    public class ItemListing : AutomationBase
     {
-        // AutomarketProPlugin is in AutomarketPro namespace (will be moved to Core later)
-        private readonly AutomarketPro.AutomarketProPlugin Plugin;
-        
-        // Logging delegates - will be set by RetainerAutomation
-        public Action<string>? Log { get; set; }
-        public Action<string, Exception?>? LogError { get; set; }
-        
         // Callback to check retainer listing count (set by RetainerAutomation)
         public Func<int, int>? GetRetainerListingCount { get; set; }
 
@@ -36,74 +29,8 @@ namespace AutomarketPro.Automation
         // by RetainerAutomation before listing begins, then incremented per successful batch here.
         // Game memory (MarketItemCount) does not update mid-session, so we must track locally.
         public int SessionListingCount { get; set; } = 0;
-        
-        public ItemListing(AutomarketPro.AutomarketProPlugin plugin)
-        {
-            Plugin = plugin;
-        }
 
-        /// <summary>
-        /// Safely executes UI operations on the framework thread with proper exception handling.
-        /// </summary>
-        private async Task<bool> RunOnFrameworkThreadAsync(Func<bool> action)
-        {
-            try
-            {
-                bool result = false;
-                await Plugin.Framework.RunOnFrameworkThread(() =>
-                {
-                    try
-                    {
-                        result = action();
-                    }
-                    catch (System.AccessViolationException ex)
-                    {
-                        LogError?.Invoke("Access violation in UI operation", ex);
-                        result = false;
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError?.Invoke("Error in UI operation", ex);
-                        result = false;
-                    }
-                });
-                return result;
-            }
-            catch (Exception ex)
-            {
-                LogError?.Invoke("Error running on framework thread", ex);
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Safely executes UI operations on the framework thread (void return).
-        /// </summary>
-        private async Task RunOnFrameworkThreadAsync(Action action)
-        {
-            try
-            {
-                await Plugin.Framework.RunOnFrameworkThread(() =>
-                {
-                    try
-                    {
-                        action();
-                    }
-                    catch (System.AccessViolationException ex)
-                    {
-                        LogError?.Invoke("Access violation in UI operation", ex);
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError?.Invoke("Error in UI operation", ex);
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                LogError?.Invoke("Error running on framework thread", ex);
-            }
-        }
+        public ItemListing(AutomarketPro.AutomarketProPlugin plugin) : base(plugin) { }
 
         /// <summary>
         /// Safely gets InventoryManager with retry logic (up to 5 attempts).
@@ -342,7 +269,6 @@ namespace AutomarketPro.Automation
                     await Task.Delay(66, token);
                     
                     // Only do price comparison on first batch (or if not using Data Center Scan)
-                    bool priceFound = false;
                     if (firstBatch && !skipComparePrices)
                     {
                         // Only compare prices if Data Center Scan is not enabled and this is the first batch
@@ -393,7 +319,6 @@ namespace AutomarketPro.Automation
                                 {
                                     var undercutAmount = Plugin.Configuration.UndercutAmount;
                                     lowestPrice = price > undercutAmount ? (uint)(price - undercutAmount) : 1;
-                                    priceFound = true;
                                     break;
                                 }
                             }
@@ -402,13 +327,7 @@ namespace AutomarketPro.Automation
                     else if (firstBatch && skipComparePrices)
                     {
                         // Data Center Scan is enabled - use the cached price from EvaluateProfitability
-                        priceFound = true; // Mark as found since we're using the pre-calculated price
                         Log?.Invoke($"[AutoMarket] Using cached data center price for {item.ItemName}: {lowestPrice} (skipping compare prices)");
-                    }
-                    else
-                    {
-                        // Subsequent batches - use the same price as first batch
-                        priceFound = true;
                     }
                     
                     await Task.Delay(66, token);
@@ -1218,107 +1137,59 @@ namespace AutomarketPro.Automation
             }
         }
         
-        public async Task<bool> ClickPutUpForSale(ScannedItem item, CancellationToken token)
+        /// <summary>
+        /// Finds a named entry in the current context menu, verifies the retainer UI is ready, and fires it.
+        /// </summary>
+        private async Task<bool> ClickNamedContextMenuEntry(
+            string primaryText,
+            string[] fallbackTexts,
+            uint addonSheetRow,
+            CancellationToken token)
         {
             try
             {
-                // Wait for context menu to appear - use RaptureAtkUnitManager like SelectString
-                ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu = null;
-                nint contextMenuPtr = nint.Zero;
-                
-                // First, verify retainer UI is still ready
-                bool uiReady = await IsRetainerUIReady();
-                if (!uiReady)
+                if (!await IsRetainerUIReady())
                 {
-                    LogError?.Invoke("[AutoMarket] Retainer UI is not ready when trying to click Put Up for Sale", null);
+                    LogError?.Invoke($"[AutoMarket] Retainer UI not ready when clicking '{primaryText}'", null);
                     return false;
                 }
-                
-                for (int attempts = 0; attempts < 30; attempts++)
+
+                var (contextMenu, _) = await WaitForContextMenu(token);
+                if (contextMenu == null)
                 {
-                    await Task.Delay(66, token);
-                    try
-                    {
-                        unsafe
-                        {
-                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
-                            {
-                                if (ECommons.GenericHelpers.IsAddonReady(&contextMenuAddon->AtkUnitBase))
-                                {
-                                    contextMenuPtr = (nint)contextMenuAddon;
-                                }
-                            }
-                        }
-                        
-                        if (contextMenuPtr != nint.Zero)
-                        {
-                            try
-                            {
-                                contextMenu = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu(contextMenuPtr);
-                                break;
-                            }
-                            catch (Exception ex)
-                            {
-                                LogError?.Invoke($"[AutoMarket] Error creating ContextMenu wrapper: {ex.Message}", null);
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                
-                if (contextMenu == null || contextMenuPtr == nint.Zero)
-                {
-                    LogError?.Invoke("[AutoMarket] Context menu not found", null);
+                    LogError?.Invoke($"[AutoMarket] Context menu not found when clicking '{primaryText}'", null);
                     return false;
                 }
-                
-                // Get "Put Up for Sale" text from Addon sheet row 99
-                string putUpForSaleText = "Put Up for Sale";
+
+                string localizedText = primaryText;
                 try
                 {
-                    if (Plugin?.DataManager != null)
-                    {
-                        var addonSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Addon>();
-                        var row99Text = addonSheet?.GetRow(99).Text.ToString();
-                        if (!string.IsNullOrEmpty(row99Text))
-                        {
-                            putUpForSaleText = row99Text;
-                        }
-                    }
+                    var rowText = Plugin?.DataManager?.GetExcelSheet<Lumina.Excel.Sheets.Addon>()
+                        ?.GetRow(addonSheetRow).Text.ToString();
+                    if (!string.IsNullOrEmpty(rowText))
+                        localizedText = rowText;
                 }
                 catch { }
-                
-                // Access entries with defensive checks
-                ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu.Entry[] entries = null;
-                try
+
+                var entries = contextMenu.Entries;
+                if (entries == null)
                 {
-                    entries = contextMenu.Entries;
-                    if (entries == null)
-                    {
-                        LogError?.Invoke("[AutoMarket] Context menu has no entries", null);
-                        return false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogError?.Invoke($"[AutoMarket] Error accessing context menu entries: {ex.Message}", null);
+                    LogError?.Invoke("[AutoMarket] Context menu has no entries", null);
                     return false;
                 }
-                
-                // Find "Put Up for Sale" entry
+
                 int foundIndex = -1;
                 for (int i = 0; i < entries.Length; i++)
-                        {
-                            try
-                            {
+                {
+                    try
+                    {
                         var entry = entries[i];
                         if (!entry.Enabled) continue;
-                        
-                        var entryText = entry.Text;
-                        if (entryText != null && 
-                            (entryText.Equals(putUpForSaleText, StringComparison.OrdinalIgnoreCase) ||
-                             entryText.Contains("Put Up for Sale", StringComparison.OrdinalIgnoreCase) ||
-                             entryText.Contains("Sell items", StringComparison.OrdinalIgnoreCase)))
+                        var text = entry.Text;
+                        if (text == null) continue;
+                        if (text.Equals(localizedText, StringComparison.OrdinalIgnoreCase)
+                            || text.Equals(primaryText, StringComparison.OrdinalIgnoreCase)
+                            || fallbackTexts.Any(f => text.Contains(f, StringComparison.OrdinalIgnoreCase)))
                         {
                             foundIndex = entry.Index;
                             break;
@@ -1326,55 +1197,31 @@ namespace AutomarketPro.Automation
                     }
                     catch { continue; }
                 }
-                
+
                 if (foundIndex < 0)
                 {
-                    LogError?.Invoke("[AutoMarket] Could not find 'Put Up for Sale' option in context menu", null);
+                    LogError?.Invoke($"[AutoMarket] Could not find '{primaryText}' in context menu", null);
                     return false;
                 }
-                
-                // Click the entry using FireCallback
-                unsafe
+
+                if (!FireContextMenuEntry(foundIndex))
                 {
-                    // Re-validate context menu is still ready before clicking
-                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
-                    {
-                        LogError?.Invoke("[AutoMarket] ContextMenu addon not found when trying to click", null);
-                        return false;
-                    }
-                    
-                    var atkUnitBase = &contextMenuAddon->AtkUnitBase;
-                    if (atkUnitBase == null || !ECommons.GenericHelpers.IsAddonReady(atkUnitBase))
-                    {
-                        LogError?.Invoke("[AutoMarket] ContextMenu addon is not ready", null);
-                        return false;
-                    }
-                    
-                    // Verify retainer UI is still ready (synchronous check since we're already on framework thread)
-                    if (!IsRetainerUIReadySync())
-                    {
-                        LogError?.Invoke("[AutoMarket] Retainer UI is not ready when clicking context menu", null);
-                        return false;
-                    }
-                    
-                    // Based on ECommons ContextMenu.Entry.Select(): values [0, Index, 0]
-                    var values = stackalloc FFXIVClientStructs.FFXIV.Component.GUI.AtkValue[3]
-                    {
-                        new() { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 },
-                        new() { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = foundIndex },
-                        new() { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 }
-                    };
-                    atkUnitBase->FireCallback(3, values, true);
+                    LogError?.Invoke($"[AutoMarket] Failed to fire context menu for '{primaryText}'", null);
+                    return false;
                 }
+
                 await Task.Delay(198, token);
                 return true;
             }
             catch (Exception ex)
             {
-                LogError?.Invoke($"[AutoMarket] Error clicking 'Put Up for Sale': {ex.Message}", null);
+                LogError?.Invoke($"[AutoMarket] Error clicking '{primaryText}': {ex.Message}", null);
                 return false;
             }
         }
+
+        public async Task<bool> ClickPutUpForSale(ScannedItem item, CancellationToken token)
+            => await ClickNamedContextMenuEntry("Put Up for Sale", new[] { "Put Up for Sale", "Sell items" }, 99, token);
         
         public async Task<bool> VendorItem(ScannedItem item, CancellationToken token)
         {
@@ -1428,162 +1275,7 @@ namespace AutomarketPro.Automation
         }
         
         public async Task<bool> ClickHaveRetainerSellItems(ScannedItem item, CancellationToken token)
-        {
-            try
-            {
-                // Wait for context menu to appear - use RaptureAtkUnitManager like SelectString
-                ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu = null;
-                nint contextMenuPtr = nint.Zero;
-                
-                // First, verify retainer UI is still ready
-                bool uiReady = await IsRetainerUIReady();
-                if (!uiReady)
-                {
-                    LogError?.Invoke("[AutoMarket] Retainer UI is not ready when trying to click Have Retainer Sell Items", null);
-                    return false;
-                }
-                
-                for (int attempts = 0; attempts < 30; attempts++)
-                {
-                    await Task.Delay(66, token);
-                    try
-                    {
-                        unsafe
-                        {
-                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
-                            {
-                                if (ECommons.GenericHelpers.IsAddonReady(&contextMenuAddon->AtkUnitBase))
-                                {
-                                    contextMenuPtr = (nint)contextMenuAddon;
-                                }
-                            }
-                        }
-                        
-                        if (contextMenuPtr != nint.Zero)
-                        {
-                            try
-                            {
-                                contextMenu = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu(contextMenuPtr);
-                                break;
-                            }
-                            catch (Exception ex)
-                            {
-                                LogError?.Invoke($"[AutoMarket] Error creating ContextMenu wrapper: {ex.Message}", null);
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                
-                if (contextMenu == null || contextMenuPtr == nint.Zero)
-                {
-                    LogError?.Invoke("[AutoMarket] Context menu not found", null);
-                    return false;
-                }
-                
-                // Get "Have Retainer Sell Items" text from Addon sheet row 5480
-                string retainerSellText = "Have Retainer Sell Items";
-                try
-                {
-                    if (Plugin?.DataManager != null)
-                    {
-                        var addonSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Addon>();
-                        var row5480Text = addonSheet?.GetRow(5480).Text.ToString();
-                        if (!string.IsNullOrEmpty(row5480Text))
-                        {
-                            retainerSellText = row5480Text;
-                        }
-                    }
-                }
-                catch { }
-                
-                // Access entries with defensive checks
-                ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu.Entry[] entries = null;
-                try
-                {
-                    entries = contextMenu.Entries;
-                    if (entries == null)
-                    {
-                        LogError?.Invoke("[AutoMarket] Context menu has no entries", null);
-                        return false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogError?.Invoke($"[AutoMarket] Error accessing context menu entries: {ex.Message}", null);
-                    return false;
-                }
-                
-                // Find "Have Retainer Sell Items" entry
-                int foundIndex = -1;
-                for (int i = 0; i < entries.Length; i++)
-                {
-                    try
-                    {
-                        var entry = entries[i];
-                        if (!entry.Enabled) continue;
-                        
-                        var entryText = entry.Text;
-                        if (entryText != null && 
-                            (entryText.Equals(retainerSellText, StringComparison.OrdinalIgnoreCase) ||
-                             entryText.Contains("Have Retainer Sell Items", StringComparison.OrdinalIgnoreCase) ||
-                             entryText.Contains("Sell Items", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            foundIndex = entry.Index;
-                            break;
-                        }
-                    }
-                    catch { continue; }
-                }
-                
-                if (foundIndex < 0)
-                {
-                    LogError?.Invoke("[AutoMarket] Could not find 'Have Retainer Sell Items' option in context menu", null);
-                    return false;
-                }
-                
-                // Click the entry using FireCallback
-                unsafe
-                {
-                    // Re-validate context menu is still ready before clicking
-                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
-                    {
-                        LogError?.Invoke("[AutoMarket] ContextMenu addon not found when trying to click", null);
-                        return false;
-                    }
-                    
-                    var atkUnitBase = &contextMenuAddon->AtkUnitBase;
-                    if (atkUnitBase == null || !ECommons.GenericHelpers.IsAddonReady(atkUnitBase))
-                    {
-                        LogError?.Invoke("[AutoMarket] ContextMenu addon is not ready", null);
-                        return false;
-                    }
-                    
-                    // Verify retainer UI is still ready (synchronous check since we're already on framework thread)
-                    if (!IsRetainerUIReadySync())
-                    {
-                        LogError?.Invoke("[AutoMarket] Retainer UI is not ready when clicking context menu", null);
-                        return false;
-                    }
-                    
-                    // Based on ECommons ContextMenu.Entry.Select(): values [0, Index, 0]
-                    var values = stackalloc FFXIVClientStructs.FFXIV.Component.GUI.AtkValue[3]
-                    {
-                        new() { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 },
-                        new() { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = foundIndex },
-                        new() { Type = FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int, Int = 0 }
-                    };
-                    atkUnitBase->FireCallback(3, values, true);
-                }
-                await Task.Delay(198, token);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LogError?.Invoke($"[AutoMarket] Error clicking 'Have Retainer Sell Items': {ex.Message}", null);
-                return false;
-            }
-        }
+            => await ClickNamedContextMenuEntry("Have Retainer Sell Items", new[] { "Have Retainer Sell Items", "Sell Items" }, 5480, token);
         
         public async Task<uint> GetLowestPriceFromComparePrices(ScannedItem item, CancellationToken token)
         {
@@ -1628,7 +1320,7 @@ namespace AutomarketPro.Automation
             await Task.Delay(132, token);
             if (token.IsCancellationRequested) return 0;
             
-            ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ItemSearchResult itemSearch = null;
+            ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ItemSearchResult? itemSearch = null;
             for (int attempts = 0; attempts < 40; attempts++)
             {
                 await Task.Delay(66, token);
@@ -1789,15 +1481,16 @@ namespace AutomarketPro.Automation
                 return 0;
             }
             
-            // Basic outlier guard: if the lowest price is a steep outlier (<50% of next lowest), ignore it
+            // Outlier guard: if the lowest price is below the configured % of the next lowest, skip it
             uint adjustedLowest = lowestPrice;
-            if (parsedPrices.Count >= 2)
+            int outlierPct = Plugin.Configuration.OutlierThresholdPercent;
+            if (outlierPct > 0 && parsedPrices.Count >= 2)
             {
                 parsedPrices.Sort();
                 uint secondLowest = parsedPrices[1];
-                if (parsedPrices[0] * 2 < secondLowest)
+                if (parsedPrices[0] * 100 < secondLowest * outlierPct)
                 {
-                    Log?.Invoke($"[AutoMarket] Ignoring outlier lowest price {parsedPrices[0]:N0} gil; using second lowest {secondLowest:N0} gil");
+                    Log?.Invoke($"[AutoMarket] Ignoring outlier lowest price {parsedPrices[0]:N0} gil (below {outlierPct}% of next lowest {secondLowest:N0} gil); using {secondLowest:N0} gil");
                     adjustedLowest = secondLowest;
                 }
             }
@@ -2027,9 +1720,10 @@ namespace AutomarketPro.Automation
                     return listedItems;
                 }
                 
-                // Find the retainer by index
+                // Find the retainer by index and read MarketItemCount from the value-type struct copy —
+                // taking &r (address of a local) and dereferencing it after the loop is undefined behaviour.
                 int validRetainerIndex = 0;
-                FFXIVClientStructs.FFXIV.Client.Game.RetainerManager.Retainer* retainer = null;
+                int marketItemCount = -1;
                 for (int i = 0; i < retainerManager->Retainers.Length; i++)
                 {
                     var r = retainerManager->Retainers[i];
@@ -2037,25 +1731,18 @@ namespace AutomarketPro.Automation
                     {
                         if (validRetainerIndex == retainerIndex)
                         {
-                            retainer = &r;
+                            marketItemCount = r.MarketItemCount;
                             break;
                         }
                         validRetainerIndex++;
                     }
                 }
-                
-                if (retainer == null)
+
+                if (marketItemCount < 0)
                 {
                     LogError?.Invoke($"[AutoMarket] Could not find retainer at index {retainerIndex}", null);
                     return listedItems;
                 }
-                
-                // Access market items from RetainerManager
-                // Note: Market items are stored in RetainerManager, but we need to access them through the retainer's market data
-                // For now, we'll use the market item count and access items through the UI addon
-                // This is a simplified approach - in practice, we may need to access the RetainerSellList addon's component list
-                
-                int marketItemCount = retainer->MarketItemCount;
                 if (marketItemCount == 0)
                 {
                     Log?.Invoke("[AutoMarket] Retainer has no market items");
@@ -2455,9 +2142,9 @@ namespace AutomarketPro.Automation
             {
                 if (token.IsCancellationRequested) return false;
                 
-                ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu = null;
+                ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu? contextMenu = null;
                 nint contextMenuPtr = nint.Zero;
-                
+
                 for (int attempts = 0; attempts < 30 && !token.IsCancellationRequested; attempts++)
                 {
                     await Task.Delay(66, token);
@@ -2561,31 +2248,13 @@ namespace AutomarketPro.Automation
                     LogError?.Invoke("[AutoMarket] Could not find 'Adjust Price' option in context menu", null);
                     return false;
                 }
-                
-                unsafe
+
+                if (!FireContextMenuEntry(foundIndex))
                 {
-                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenuAddon))
-                    {
-                        LogError?.Invoke("[AutoMarket] ContextMenu addon not found when trying to click", null);
-                        return false;
-                    }
-                    
-                    if (contextMenuAddon == null)
-                    {
-                        LogError?.Invoke("[AutoMarket] ContextMenu addon is null", null);
-                        return false;
-                    }
-                    
-                    var atkUnitBase = &contextMenuAddon->AtkUnitBase;
-                    if (atkUnitBase == null || !ECommons.GenericHelpers.IsAddonReady(atkUnitBase))
-                    {
-                        LogError?.Invoke("[AutoMarket] ContextMenu addon is not ready", null);
-                        return false;
-                    }
-                    
-                    ECommons.Automation.Callback.Fire(atkUnitBase, true, 0, 0, 0, 0, 0);
+                    LogError?.Invoke("[AutoMarket] Failed to fire context menu for Adjust Price", null);
+                    return false;
                 }
-                
+
                 await Task.Delay(220, token);
                 if (token.IsCancellationRequested) return false;
                 return true;
@@ -2600,10 +2269,10 @@ namespace AutomarketPro.Automation
         /// <summary>
         /// Waits for the context menu to appear and returns its wrapper, or null on failure.
         /// </summary>
-        private async Task<(ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu, nint ptr)> WaitForContextMenu(CancellationToken token)
+        private async Task<(ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu? contextMenu, nint ptr)> WaitForContextMenu(CancellationToken token)
         {
             nint contextMenuPtr = nint.Zero;
-            ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu contextMenu = null;
+            ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ContextMenu? contextMenu = null;
 
             for (int attempts = 0; attempts < 30; attempts++)
             {
@@ -2654,45 +2323,34 @@ namespace AutomarketPro.Automation
         }
 
         /// <summary>
-        /// Clicks "Return Items to Inventory" (returns listed item to the player's inventory).
-        /// Uses strict text matching — no broad fallback — to avoid hitting the wrong menu entry.
+        /// Finds the "Return Items to Inventory" entry in the context menu and fires it.
+        /// strict=true uses exact matching only; strict=false also accepts any entry containing "Return".
         /// </summary>
-        private async Task<bool> ClickReturnToPlayerInventory(CancellationToken token)
+        private async Task<bool> ClickWithdrawContextMenuEntry(bool strict, CancellationToken token)
         {
             try
             {
                 var (contextMenu, ptr) = await WaitForContextMenu(token);
                 if (contextMenu == null || ptr == nint.Zero)
                 {
-                    LogError?.Invoke("[AutoMarket] Context menu not found for return-to-player", null);
+                    LogError?.Invoke("[AutoMarket] Context menu not found for withdraw", null);
                     return false;
                 }
 
-                // Build the exact text from Addon sheet, fall back only to a literal exact string
                 string returnText = "Return Items to Inventory";
                 try
                 {
-                    if (Plugin?.DataManager != null)
-                    {
-                        var addonSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Addon>();
-                        if (addonSheet != null)
-                        {
-                            var row = addonSheet.GetRow(5482);
-                            if (row.RowId != 0)
-                            {
-                                var text = row.Text.ToString();
-                                if (!string.IsNullOrEmpty(text))
-                                    returnText = text;
-                            }
-                        }
-                    }
+                    var rowText = Plugin?.DataManager?.GetExcelSheet<Lumina.Excel.Sheets.Addon>()
+                        ?.GetRow(5482).Text.ToString();
+                    if (!string.IsNullOrEmpty(rowText))
+                        returnText = rowText;
                 }
                 catch { }
 
                 var entries = contextMenu.Entries;
                 if (entries == null)
                 {
-                    LogError?.Invoke("[AutoMarket] Context menu has no entries (return-to-player)", null);
+                    LogError?.Invoke("[AutoMarket] Context menu has no entries (withdraw)", null);
                     return false;
                 }
 
@@ -2703,27 +2361,31 @@ namespace AutomarketPro.Automation
                     {
                         var entry = entries[i];
                         if (!entry.Enabled) continue;
-                        var entryText = entry.Text;
-                        if (entryText != null &&
-                            (entryText.Equals(returnText, StringComparison.OrdinalIgnoreCase) ||
-                             entryText.Equals("Return Items to Inventory", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            foundIndex = entry.Index;
-                            break;
-                        }
+                        var text = entry.Text;
+                        if (text == null) continue;
+
+                        bool matches = strict
+                            ? text.Equals(returnText, StringComparison.OrdinalIgnoreCase)
+                              || text.Equals("Return Items to Inventory", StringComparison.OrdinalIgnoreCase)
+                            : text.Equals(returnText, StringComparison.OrdinalIgnoreCase)
+                              || text.Contains("Return Items to Inventory", StringComparison.OrdinalIgnoreCase)
+                              || text.Contains("Return to Inventory", StringComparison.OrdinalIgnoreCase)
+                              || text.Contains("Return", StringComparison.OrdinalIgnoreCase);
+
+                        if (matches) { foundIndex = entry.Index; break; }
                     }
                     catch { continue; }
                 }
 
                 if (foundIndex < 0)
                 {
-                    LogError?.Invoke("[AutoMarket] Could not find exact 'Return Items to Inventory' in context menu", null);
+                    LogError?.Invoke($"[AutoMarket] Could not find withdraw option (strict={strict}) in context menu", null);
                     return false;
                 }
 
                 if (!FireContextMenuEntry(foundIndex))
                 {
-                    LogError?.Invoke("[AutoMarket] Failed to fire context menu for return-to-player", null);
+                    LogError?.Invoke("[AutoMarket] Failed to fire context menu for withdraw", null);
                     return false;
                 }
 
@@ -2732,95 +2394,16 @@ namespace AutomarketPro.Automation
             }
             catch (Exception ex)
             {
-                LogError?.Invoke($"[AutoMarket] Error in ClickReturnToPlayerInventory: {ex.Message}", ex);
+                LogError?.Invoke($"[AutoMarket] Error in ClickWithdrawContextMenuEntry: {ex.Message}", ex);
                 return false;
             }
         }
 
-        /// <summary>
-        /// Clicks the first context menu entry that contains "Return" — moves the listed item to
-        /// the retainer's bag (the confirmed-working behavior the user observed).
-        /// </summary>
-        private async Task<bool> ClickMoveToRetainerBag(CancellationToken token)
-        {
-            try
-            {
-                var (contextMenu, ptr) = await WaitForContextMenu(token);
-                if (contextMenu == null || ptr == nint.Zero)
-                {
-                    LogError?.Invoke("[AutoMarket] Context menu not found for move-to-retainer-bag", null);
-                    return false;
-                }
+        private Task<bool> ClickReturnToPlayerInventory(CancellationToken token)
+            => ClickWithdrawContextMenuEntry(strict: true, token);
 
-                string returnText = "Return Items to Inventory";
-                try
-                {
-                    if (Plugin?.DataManager != null)
-                    {
-                        var addonSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Addon>();
-                        if (addonSheet != null)
-                        {
-                            var row = addonSheet.GetRow(5482);
-                            if (row.RowId != 0)
-                            {
-                                var text = row.Text.ToString();
-                                if (!string.IsNullOrEmpty(text))
-                                    returnText = text;
-                            }
-                        }
-                    }
-                }
-                catch { }
-
-                var entries = contextMenu.Entries;
-                if (entries == null)
-                {
-                    LogError?.Invoke("[AutoMarket] Context menu has no entries (move-to-retainer-bag)", null);
-                    return false;
-                }
-
-                int foundIndex = -1;
-                for (int i = 0; i < entries.Length; i++)
-                {
-                    try
-                    {
-                        var entry = entries[i];
-                        if (!entry.Enabled) continue;
-                        var entryText = entry.Text;
-                        if (entryText != null &&
-                            (entryText.Equals(returnText, StringComparison.OrdinalIgnoreCase) ||
-                             entryText.Contains("Return Items to Inventory", StringComparison.OrdinalIgnoreCase) ||
-                             entryText.Contains("Return to Inventory", StringComparison.OrdinalIgnoreCase) ||
-                             entryText.Contains("Return", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            foundIndex = entry.Index;
-                            break;
-                        }
-                    }
-                    catch { continue; }
-                }
-
-                if (foundIndex < 0)
-                {
-                    LogError?.Invoke("[AutoMarket] Could not find a 'Return' option in context menu (move-to-retainer-bag)", null);
-                    return false;
-                }
-
-                if (!FireContextMenuEntry(foundIndex))
-                {
-                    LogError?.Invoke("[AutoMarket] Failed to fire context menu for move-to-retainer-bag", null);
-                    return false;
-                }
-
-                await Task.Delay(550, token);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                LogError?.Invoke($"[AutoMarket] Error in ClickMoveToRetainerBag: {ex.Message}", ex);
-                return false;
-            }
-        }
+        private Task<bool> ClickMoveToRetainerBag(CancellationToken token)
+            => ClickWithdrawContextMenuEntry(strict: false, token);
         
         /// <summary>
         /// Checks if inventory has space for items.
@@ -2906,11 +2489,11 @@ namespace AutomarketPro.Automation
         /// Manages listed items on the retainer's market board.
         /// Adjusts prices for each listed item by undercutting the cheapest market price using Compare Price.
         /// </summary>
-        public async Task ManageListedItems(int retainerIndex, CancellationToken token)
+        public async Task ManageListedItems(int retainerIndex, CancellationToken token, bool forceRun = false)
         {
             try
             {
-                if (!Plugin.Configuration.ManageListedItems)
+                if (!forceRun && !Plugin.Configuration.ManageListedItems)
                 {
                     return;
                 }
@@ -3108,8 +2691,39 @@ namespace AutomarketPro.Automation
                     
                     await SetPriceInRetainerSell(newPrice, 1, token);
                     Log?.Invoke($"[AutoMarket] Successfully adjusted price to {newPrice:N0}");
+
+                    // Close ItemSearchResult if it is still open before moving to the next item.
+                    // GetLowestPriceFromComparePrices reads the price but leaves the window open,
+                    // which causes UI overlap when the next item's context menu fires.
+                    await RunOnFrameworkThreadAsync(() =>
+                    {
+                        unsafe
+                        {
+                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var isr)
+                                && isr != null && ECommons.GenericHelpers.IsAddonReady(isr))
+                            {
+                                isr->Close(true);
+                            }
+                        }
+                    });
+
+                    // Wait for RetainerSellList to be visible again before clicking the next item.
+                    for (int waitAttempt = 0; waitAttempt < 30 && !token.IsCancellationRequested; waitAttempt++)
+                    {
+                        await Task.Delay(110, token);
+                        bool listReady = false;
+                        unsafe
+                        {
+                            if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RetainerSellList", out var rsl)
+                                && rsl != null && ECommons.GenericHelpers.IsAddonReady(rsl) && rsl->IsVisible)
+                            {
+                                listReady = true;
+                            }
+                        }
+                        if (listReady) break;
+                    }
                 }
-                
+
                 Log?.Invoke("[AutoMarket] Listed item price adjustment complete.");
             }
             catch (Exception ex)
@@ -3214,12 +2828,12 @@ namespace AutomarketPro.Automation
                 unsafe
                 {
                     var inventoryManager = GetInventoryManagerSafe();
-                    if (inventoryManager == null) return null;
-                    
-                    if (Plugin?.DataManager == null) return null;
-                    
+                    if (inventoryManager == null) return Task.FromResult<ScannedItem?>(null);
+
+                    if (Plugin?.DataManager == null) return Task.FromResult<ScannedItem?>(null);
+
                     var itemSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>();
-                    if (itemSheet == null) return null;
+                    if (itemSheet == null) return Task.FromResult<ScannedItem?>(null);
                     
                     InventoryType[] inventoryTypes = {
                         InventoryType.Inventory1,

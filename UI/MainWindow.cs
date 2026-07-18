@@ -429,6 +429,14 @@ namespace AutomarketPro.UI
                     {
                         Task.Run(async () => await Automation.StartClearCycle());
                     }
+
+                    ImGui.SameLine();
+                    if (ImGui.Button("[R] Reprice", new Vector2(90, 25)))
+                    {
+                        Task.Run(async () => await Automation.StartRepriceCycle());
+                    }
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Reprice all listed items on every retainer using the current penny-pinch undercut logic");
                 }
                 else
                 {
@@ -840,7 +848,13 @@ namespace AutomarketPro.UI
                     var undercutAmount = Plugin.Configuration.UndercutAmount;
                     if (ImGui.DragInt("Undercut Amount", ref undercutAmount, 1, 0, 10000))
                         Plugin.Configuration.UndercutAmount = undercutAmount;
-                        
+
+                    var outlierThreshold = Plugin.Configuration.OutlierThresholdPercent;
+                    if (ImGui.DragInt("Outlier Price Threshold (%)", ref outlierThreshold, 1, 0, 100))
+                        Plugin.Configuration.OutlierThresholdPercent = outlierThreshold;
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("If the cheapest listing is below this % of the next cheapest, it is treated as\nan outlier and skipped. Set to 0 to always undercut the absolute lowest price.");
+
                     var minProfitThreshold = Plugin.Configuration.MinProfitThreshold;
                     if (ImGui.DragInt("Min Profit Threshold", ref minProfitThreshold, 1, 0, 100000))
                         Plugin.Configuration.MinProfitThreshold = minProfitThreshold;
@@ -986,7 +1000,9 @@ namespace AutomarketPro.UI
                     var inventoryManager = GetInventoryManagerSafe();
                     if (inventoryManager == null) return;
                     
+#pragma warning disable CS8602
                     if (Plugin.DataManager == null) return;
+#pragma warning restore CS8602
                     
                     var itemSheet = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>();
                     if (itemSheet == null) return;

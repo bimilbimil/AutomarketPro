@@ -1,6 +1,6 @@
 # AutoMarket Pro
 
-Automates inventory scanning, marketboard listing, vendor selling, and retainer clearing using Universalis data and retainer control.
+Automates inventory scanning, marketboard listing, vendor selling, retainer clearing, and price repricing using Universalis data and retainer control.
 
 ## Features
 
@@ -9,7 +9,9 @@ Automates inventory scanning, marketboard listing, vendor selling, and retainer 
 - **Smart Listing**: Automatically lists profitable items on the Market Board with auto-undercut
 - **Vendor Automation**: Sells unprofitable items to vendors via retainers
 - **Price Management**: Adjusts prices on already-listed items to stay competitive
+- **Reprice**: Re-undercuts every item currently listed across all retainers in one click
 - **Retainer Clearing**: Pulls all listed market items back to your inventory or retainer bag in one click
+- **Outlier Price Protection**: Skips suspiciously low listings when undercutting (configurable threshold)
 - **Retainer Management**: Cycles through all available retainers automatically
 - **Ignore List**: Exclude specific items from processing
 - **Configurable Settings**: Customize undercut amounts, profit thresholds, delays, and more
@@ -54,6 +56,7 @@ All three quick-action buttons are always visible at the top of the window:
 | **[>] Start Full Cycle** | Scan inventory, then list and/or vendor items across all retainers |
 | **[S] Scan Only** | Scan inventory and fetch prices without touching retainers |
 | **[C] Clear** | Pull all listed market items back from retainers (see Clear tab for options) |
+| **[R] Reprice** | Re-undercut every currently listed item across all retainers using the current penny-pinch logic |
 
 > **Tip:** Keep your mouse still while automation is running — moving it can interfere with UI interactions.
 
@@ -95,6 +98,7 @@ The **[C] Clear** button pulls all currently listed market items back from your 
 ### Market Board Settings
 
 - **Undercut Amount**: How much to undercut the lowest listed price (default: 1 gil)
+- **Outlier Price Threshold (%)**: If the cheapest listing is below this percentage of the next cheapest, it is treated as an outlier and skipped. Set to 0 to always undercut the absolute lowest price (default: 50%)
 - **Min Profit Threshold**: Minimum profit over vendor price required to list on MB (default: 100 gil)
 - **Auto-undercut**: Automatically undercut the lowest market price when listing
 

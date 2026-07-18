@@ -14,6 +14,7 @@ namespace AutomarketPro.Core
         public int UndercutAmount { get; set; } = 1;
         public int MinProfitThreshold { get; set; } = 100;
         public bool AutoUndercut { get; set; } = true;
+        public int OutlierThresholdPercent { get; set; } = 50;
         
         // Automation settings
         public int ActionDelay { get; set; } = 300;
@@ -62,6 +63,7 @@ namespace AutomarketPro.Core
             UndercutAmount = 1;
             MinProfitThreshold = 100;
             AutoUndercut = true;
+            OutlierThresholdPercent = 50;
             ActionDelay = 300;
             RetainerDelay = 1200;
             ListOnlyMode = false;

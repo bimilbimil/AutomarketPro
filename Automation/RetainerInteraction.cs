@@ -16,82 +16,9 @@ namespace AutomarketPro.Automation
     /// <summary>
     /// Handles retainer interaction automation - opening and selecting retainers
     /// </summary>
-    public class RetainerInteraction
+    public class RetainerInteraction : AutomationBase
     {
-        // AutomarketProPlugin is in AutomarketPro namespace (will be moved to Core later)
-        private readonly AutomarketPro.AutomarketProPlugin Plugin;
-        
-        // Logging delegates - will be set by RetainerAutomation
-        public Action<string>? Log { get; set; }
-        public Action<string, Exception?>? LogError { get; set; }
-        
-        public RetainerInteraction(AutomarketProPlugin plugin)
-        {
-            Plugin = plugin;
-        }
-
-        /// <summary>
-        /// Safely executes UI operations on the framework thread with proper exception handling.
-        /// </summary>
-        private async Task<bool> RunOnFrameworkThreadAsync(Func<bool> action)
-        {
-            try
-            {
-                bool result = false;
-                await Plugin.Framework.RunOnFrameworkThread(() =>
-                {
-                    try
-                    {
-                        result = action();
-                    }
-                    catch (System.AccessViolationException ex)
-                    {
-                        LogError?.Invoke("Access violation in UI operation", ex);
-                        result = false;
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError?.Invoke("Error in UI operation", ex);
-                        result = false;
-                    }
-                });
-                return result;
-            }
-            catch (Exception ex)
-            {
-                LogError?.Invoke("Error running on framework thread", ex);
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Safely executes UI operations on the framework thread (void return).
-        /// </summary>
-        private async Task RunOnFrameworkThreadAsync(Action action)
-        {
-            try
-            {
-                await Plugin.Framework.RunOnFrameworkThread(() =>
-                {
-                    try
-                    {
-                        action();
-                    }
-                    catch (System.AccessViolationException ex)
-                    {
-                        LogError?.Invoke("Access violation in UI operation", ex);
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError?.Invoke("Error in UI operation", ex);
-                    }
-                });
-            }
-            catch (Exception ex)
-            {
-                LogError?.Invoke("Error running on framework thread", ex);
-            }
-        }
+        public RetainerInteraction(AutomarketProPlugin plugin) : base(plugin) { }
 
         /// <summary>
         /// Safely gets RetainerManager with retry logic (up to 5 attempts).
@@ -373,7 +300,7 @@ namespace AutomarketPro.Automation
                                 return false;
                             }
                             
-                            ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.SelectString selectString = null;
+                            ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.SelectString? selectString = null;
                             try
                             {
                                 selectString = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.SelectString(addon);
@@ -428,14 +355,14 @@ namespace AutomarketPro.Automation
                             }
                             
                             int foundEntryIndex = -1;
-                            string foundEntryText = null;
+                            string? foundEntryText = null;
                             
                             foreach (var entry in selectString.Entries)
                             {
                                 try
                                 {
                                     // Safely access entry.Text - this accesses text nodes which can be null
-                                    string entryText = null;
+                                    string? entryText = null;
                                     try
                                     {
                                         entryText = entry.Text;

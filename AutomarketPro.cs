@@ -309,7 +309,7 @@ namespace AutomarketPro
                 
                 try
                 {
-                    _commandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
+                    _commandManager!.AddHandler(CommandName, new CommandInfo(OnCommand)
                     {
                         HelpMessage = "AutoMarket Pro - /automarket [start|stop|pause|config|summary]"
                     });

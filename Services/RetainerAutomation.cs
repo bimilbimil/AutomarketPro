@@ -86,7 +86,9 @@ namespace AutomarketPro.Services
                     await Task.Delay(66);
                 }
                 
+#pragma warning disable CS8602
                 var config = Plugin.Configuration;
+#pragma warning restore CS8602
                 
                 // Handle mode-specific item routing
                 List<ScannedItem> itemsToList = new();
@@ -357,6 +359,85 @@ namespace AutomarketPro.Services
             LastRunSummary.TotalItems = LastRunSummary.ItemsListed + LastRunSummary.ItemsVendored;
         }
         
+        public async Task StartRepriceCycle()
+        {
+            if (IsRunning) return;
+
+            IsRunning = true;
+            IsPaused = false;
+            AutomationToken = new CancellationTokenSource();
+
+            Plugin?.PrintChat("[AutoMarket] Starting reprice cycle...");
+
+            try
+            {
+                StatusUpdate?.Invoke("Starting reprice...");
+                Log("[AutoMarket] Starting reprice cycle");
+
+                int retainerCount = RetainerInteraction.GetRetainerCount();
+                if (retainerCount == 0)
+                {
+                    LogError("[AutoMarket] No retainers found");
+                    return;
+                }
+
+                int totalRepriced = 0;
+
+                for (int retainerIndex = 0; retainerIndex < retainerCount && !AutomationToken.Token.IsCancellationRequested; retainerIndex++)
+                {
+                    StatusUpdate?.Invoke($"Repricing Retainer {retainerIndex + 1}...");
+                    Log($"[AutoMarket] Opening Retainer {retainerIndex + 1} for reprice");
+
+                    var success = await RetainerInteraction.OpenAndSelectRetainer(retainerIndex, AutomationToken.Token);
+                    if (!success)
+                    {
+                        LogError($"[AutoMarket] Failed to open retainer {retainerIndex + 1} for repricing");
+                        continue;
+                    }
+
+                    await Task.Delay(660, AutomationToken.Token);
+
+                    int listedCount = RetainerInteraction.GetRetainerMarketItemCount(retainerIndex);
+                    Log($"[AutoMarket] Retainer {retainerIndex + 1} has {listedCount} listed item(s) to reprice");
+
+                    await ItemListing.ManageListedItems(retainerIndex, AutomationToken.Token, forceRun: true);
+                    totalRepriced += listedCount;
+
+                    bool moreRetainers = retainerIndex < retainerCount - 1;
+                    if (moreRetainers)
+                    {
+                        await ItemListing.CloseRetainerWindow(false, AutomationToken.Token);
+                        await ItemListing.CloseRetainerList(false, AutomationToken.Token);
+                    }
+
+#pragma warning disable CS8602
+                    await Task.Delay((int)(Plugin.Configuration.RetainerDelay * 1.1), AutomationToken.Token);
+#pragma warning restore CS8602
+                }
+
+                Plugin?.PrintChat($"[AutoMarket] Reprice complete! Updated prices for {totalRepriced} listing(s).");
+                StatusUpdate?.Invoke("Reprice complete!");
+                Log($"[AutoMarket] Reprice cycle done — processed {totalRepriced} listing(s) total");
+            }
+            catch (OperationCanceledException)
+            {
+                StatusUpdate?.Invoke("Reprice stopped");
+            }
+            catch (Exception ex)
+            {
+                LogError("[AutoMarket] Reprice error", ex);
+                StatusUpdate?.Invoke($"Error: {ex.Message}");
+                Plugin?.PrintChat($"[AutoMarket] Reprice failed: {ex.Message}");
+            }
+            finally
+            {
+                IsRunning = false;
+                IsPaused = false;
+                AutomationToken?.Dispose();
+                AutomationToken = null;
+            }
+        }
+
         public async Task StartClearCycle()
         {
             if (IsRunning) return;
@@ -424,7 +505,9 @@ namespace AutomarketPro.Services
 
                     if (stoppedEarly) break;
 
+#pragma warning disable CS8602
                     await Task.Delay((int)(Plugin.Configuration.RetainerDelay * 1.1), AutomationToken.Token);
+#pragma warning restore CS8602
                 }
 
                 if (!stoppedEarly)

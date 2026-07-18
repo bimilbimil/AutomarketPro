@@ -5,7 +5,7 @@
     <AssemblyName>AutomarketPro</AssemblyName>
     <RootNamespace>AutomarketPro</RootNamespace>
     <Platforms>x64</Platforms>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
