@@ -1204,7 +1204,7 @@ namespace AutomarketPro.Automation
                     return false;
                 }
 
-                if (!FireContextMenuEntry(foundIndex))
+                if (!await FireContextMenuEntry(foundIndex))
                 {
                     LogError?.Invoke($"[AutoMarket] Failed to fire context menu for '{primaryText}'", null);
                     return false;
@@ -2136,7 +2136,7 @@ namespace AutomarketPro.Automation
                     return false;
                 }
 
-                if (!FireContextMenuEntry(foundIndex))
+                if (!await FireContextMenuEntry(foundIndex))
                 {
                     LogError?.Invoke("[AutoMarket] Failed to fire context menu for Adjust Price", null);
                     return false;
@@ -2188,25 +2188,32 @@ namespace AutomarketPro.Automation
 
         /// <summary>
         /// Fires the context menu callback for the entry at the given index.
+        /// Runs on the framework thread — game UI calls must never happen on the task thread.
         /// </summary>
-        private bool FireContextMenuEntry(int entryIndex)
+        private Task<bool> FireContextMenuEntry(int entryIndex)
         {
-            unsafe
+            var capturedIndex = entryIndex;
+            return RunOnFrameworkThreadAsync(() =>
             {
-                if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var addon))
-                    return false;
-                var atk = &addon->AtkUnitBase;
-                if (atk == null || !ECommons.GenericHelpers.IsAddonReady(atk))
-                    return false;
-                var values = stackalloc AtkValue[3]
+                unsafe
                 {
-                    new() { Type = AtkValueType.Int, Int = 0 },
-                    new() { Type = AtkValueType.Int, Int = entryIndex },
-                    new() { Type = AtkValueType.Int, Int = 0 }
-                };
-                atk->FireCallback(3, values, true);
-                return true;
-            }
+                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var addon))
+                        return false;
+                    var atk = &addon->AtkUnitBase;
+                    if (atk == null || !ECommons.GenericHelpers.IsAddonReady(atk))
+                        return false;
+                    // Heap-allocated to avoid stackalloc lifetime issues across thread boundary
+                    var values = new AtkValue[3];
+                    values[0] = new AtkValue { Type = AtkValueType.Int, Int = 0 };
+                    values[1] = new AtkValue { Type = AtkValueType.Int, Int = capturedIndex };
+                    values[2] = new AtkValue { Type = AtkValueType.Int, Int = 0 };
+                    fixed (AtkValue* valuesPtr = values)
+                    {
+                        atk->FireCallback(3, valuesPtr, true);
+                    }
+                    return true;
+                }
+            });
         }
 
         /// <summary>
@@ -2270,7 +2277,7 @@ namespace AutomarketPro.Automation
                     return false;
                 }
 
-                if (!FireContextMenuEntry(foundIndex))
+                if (!await FireContextMenuEntry(foundIndex))
                 {
                     LogError?.Invoke("[AutoMarket] Failed to fire context menu for withdraw", null);
                     return false;
@@ -2640,44 +2647,37 @@ namespace AutomarketPro.Automation
                     return false;
                 }
                 
-                unsafe
+                bool setSuccess = await RunOnFrameworkThreadAsync(() =>
                 {
-                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSell))
+                    unsafe
                     {
-                        LogError?.Invoke("[AutoMarket] RetainerSell addon not found when trying to set price", null);
-                        return false;
+                        if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSell))
+                            return false;
+                        if (retainerSell == null || !ECommons.GenericHelpers.IsAddonReady(&retainerSell->AtkUnitBase))
+                            return false;
+                        if (retainerSell->AskingPrice == null)
+                            return false;
+
+                        retainerSell->AskingPrice->SetValue((int)price);
+
+                        if (quantity > 1 && retainerSell->Quantity != null)
+                            retainerSell->Quantity->SetValue(quantity);
+
+                        var ui = &retainerSell->AtkUnitBase;
+                        if (ui == null) return false;
+
+                        ECommons.Automation.Callback.Fire(ui, true, 0);
+                        ui->Close(true);
+                        return true;
                     }
-                    
-                    if (retainerSell == null || !ECommons.GenericHelpers.IsAddonReady(&retainerSell->AtkUnitBase))
-                    {
-                        LogError?.Invoke("[AutoMarket] RetainerSell addon not ready when trying to set price", null);
-                        return false;
-                    }
-                    
-                    if (retainerSell->AskingPrice == null)
-                    {
-                        LogError?.Invoke("[AutoMarket] RetainerSell AskingPrice is null", null);
-                        return false;
-                    }
-                    
-                    retainerSell->AskingPrice->SetValue((int)price);
-                    
-                    if (quantity > 1 && retainerSell->Quantity != null)
-                    {
-                        retainerSell->Quantity->SetValue(quantity);
-                    }
-                    
-                    var ui = &retainerSell->AtkUnitBase;
-                    if (ui == null)
-                    {
-                        LogError?.Invoke("[AutoMarket] RetainerSell AtkUnitBase is null", null);
-                        return false;
-                    }
-                    
-                    ECommons.Automation.Callback.Fire(ui, true, 0);
-                    ui->Close(true);
+                });
+
+                if (!setSuccess)
+                {
+                    LogError?.Invoke("[AutoMarket] RetainerSell not ready when trying to set price", null);
+                    return false;
                 }
-                
+
                 await Task.Delay(330, token);
                 if (token.IsCancellationRequested) return false;
                 return true;
