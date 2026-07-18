@@ -1281,6 +1281,12 @@ namespace AutomarketPro.Automation
         {
             Log?.Invoke("[AutoMarket] Waiting for ItemSearchResult window and prices...");
 
+            // Give the game time to open ItemSearchResult and fully populate its text nodes before
+            // we start reading them. Reading partially-initialised nodes can leave the SeString macro
+            // state in a way that causes MacroDecoder.ReadExpression to crash on the next render frame.
+            await Task.Delay(330, token);
+            if (token.IsCancellationRequested) return 0;
+
             // Single polling loop: on each tick, jump to the framework thread and attempt to get the
             // addon + parse all prices in one atomic read. This avoids storing raw pointers across
             // awaits (which crash when the game frees the addon between iterations).
@@ -2475,16 +2481,24 @@ namespace AutomarketPro.Automation
                             
                             if (closedItemSearch)
                             {
-                                await Task.Delay(110, token);
+                                await Task.Delay(220, token);
                                 if (token.IsCancellationRequested) break;
                             }
-                            
+
+                            // Small settle delay before firing Compare Prices — if we fire the
+                            // callback while RetainerSell's text nodes are still initialising,
+                            // MacroDecoder.ReadExpression crashes on the next render frame.
+                            await Task.Delay(66, token);
+                            if (token.IsCancellationRequested) break;
+
                             bool clickedCompare = await RunOnFrameworkThreadAsync(() =>
                             {
                                 unsafe
                                 {
                                     if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var rs)
-                                        && rs != null && ECommons.GenericHelpers.IsAddonReady(&rs->AtkUnitBase))
+                                        && rs != null
+                                        && ECommons.GenericHelpers.IsAddonReady(&rs->AtkUnitBase)
+                                        && rs->AtkUnitBase.IsVisible)
                                     {
                                         ECommons.Automation.Callback.Fire(&rs->AtkUnitBase, true, 4);
                                         return true;
@@ -2492,10 +2506,10 @@ namespace AutomarketPro.Automation
                                 }
                                 return false;
                             });
-                            
+
                             if (clickedCompare)
                             {
-                                await Task.Delay(198, token);
+                                await Task.Delay(330, token);
                                 if (token.IsCancellationRequested) break;
                                 
                                 cheapestPrice = await GetLowestPriceFromComparePrices(dummyItem, token);
