@@ -1279,224 +1279,107 @@ namespace AutomarketPro.Automation
         
         public async Task<uint> GetLowestPriceFromComparePrices(ScannedItem item, CancellationToken token)
         {
-            Log?.Invoke("[AutoMarket] Waiting for ItemSearchResult window to appear...");
-            nint itemSearchPtr = nint.Zero;
-            
-            for (int attempts = 0; attempts < 40; attempts++)
+            Log?.Invoke("[AutoMarket] Waiting for ItemSearchResult window and prices...");
+
+            // Single polling loop: on each tick, jump to the framework thread and attempt to get the
+            // addon + parse all prices in one atomic read. This avoids storing raw pointers across
+            // awaits (which crash when the game frees the addon between iterations).
+            List<uint>? parsedPrices = null;
+            for (int attempts = 0; attempts < 80 && !token.IsCancellationRequested; attempts++)
             {
                 await Task.Delay(66, token);
-                
                 if (token.IsCancellationRequested) break;
-                
-                try
+
+                List<uint>? frameResult = null;
+                await RunOnFrameworkThreadAsync(() =>
                 {
                     unsafe
                     {
-                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
-                        {
-                            if (itemSearchAddon != null && ECommons.GenericHelpers.IsAddonReady(itemSearchAddon))
-                            {
-                                itemSearchPtr = (nint)itemSearchAddon;
-                                Log?.Invoke("[AutoMarket] Found ItemSearchResult window");
-                                break;
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogError?.Invoke($"[AutoMarket] Error checking ItemSearchResult (attempt {attempts}): {ex.Message}", ex);
-                    await Task.Delay(33, token);
-                    continue;
-                }
-            }
-            
-            if (itemSearchPtr == nint.Zero || token.IsCancellationRequested)
-            {
-                LogError?.Invoke("[AutoMarket] ItemSearchResult window did not appear", null);
-                return 0;
-            }
-            
-            await Task.Delay(132, token);
-            if (token.IsCancellationRequested) return 0;
-            
-            ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ItemSearchResult? itemSearch = null;
-            for (int attempts = 0; attempts < 40; attempts++)
-            {
-                await Task.Delay(66, token);
-                
-                if (token.IsCancellationRequested) break;
-                
-                try
-                {
-                    unsafe
-                    {
-                        var addon = (FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase*)itemSearchPtr;
-                        if (addon == null)
-                        {
-                            continue;
-                        }
-                        
-                        if (!ECommons.GenericHelpers.IsAddonReady(addon))
-                        {
-                            continue;
-                        }
-                    }
-                    
-                    try
-                    {
-                        itemSearch = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ItemSearchResult(itemSearchPtr);
-                        
-                        if (itemSearch?.Entries != null && itemSearch.Entries.Length > 0)
-                        {
-                            Log?.Invoke($"[AutoMarket] ItemSearchResult has {itemSearch.Entries.Length} entries");
-                            break;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError?.Invoke($"[AutoMarket] Error creating ItemSearchResult wrapper (attempt {attempts}): {ex.Message}", ex);
-                        await Task.Delay(33, token);
-                        continue;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogError?.Invoke($"[AutoMarket] Error checking ItemSearchResult (attempt {attempts}): {ex.Message}", ex);
-                    await Task.Delay(33, token);
-                    continue;
-                }
-            }
-            
-            if (itemSearch == null)
-            {
-                LogError?.Invoke("[AutoMarket] Could not create ItemSearchResult wrapper", null);
-                return 0;
-            }
-            
-            if (itemSearch.Entries == null || itemSearch.Entries.Length == 0)
-            {
-                LogError?.Invoke("[AutoMarket] ItemSearchResult window has no entries after waiting", null);
-                return 0;
-            }
-            
-            Log?.Invoke($"[AutoMarket] ItemSearchResult window has {itemSearch.Entries.Length} entries, parsing prices...");
-            
-            // Find lowest price (considering HQ/NQ)
-            uint lowestPrice = uint.MaxValue;
-            int parsedCount = 0;
-            var parsedPrices = new List<uint>();
-            
-            // Parse entries with defensive checks
-            var entries = itemSearch.Entries;
-            if (entries == null || entries.Length == 0)
-            {
-                LogError?.Invoke("[AutoMarket] ItemSearchResult.Entries is null or empty", null);
-                return 0;
-            }
-            
-            for (int i = 0; i < entries.Length; i++)
-            {
-                try
-                {
-                    var entry = entries[i];
-                    
-                    unsafe
-                    {
-                        AtkTextNode* priceTextNode = null;
                         try
                         {
-                            priceTextNode = entry.PriceTextNode;
-                        }
-                        catch
-                        {
-                            continue;
-                        }
-                        
-                        if (priceTextNode == null) continue;
-                        
-                        var nodeTextPtr = &priceTextNode->NodeText;
-                        if (nodeTextPtr == null) continue;
-                        
-                        try
-                        {
-                            var seString = ECommons.GenericHelpers.ReadSeString(nodeTextPtr);
-                            var priceText = seString.TextValue;
-                            
-                            if (!string.IsNullOrEmpty(priceText))
+                            if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var addon)
+                                || addon == null || !ECommons.GenericHelpers.IsAddonReady(addon))
+                                return;
+
+                            ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ItemSearchResult? itemSearch;
+                            try { itemSearch = new ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.ItemSearchResult((nint)addon); }
+                            catch { return; }
+
+                            if (itemSearch?.Entries == null || itemSearch.Entries.Length == 0)
+                                return;
+
+                            Log?.Invoke($"[AutoMarket] ItemSearchResult has {itemSearch.Entries.Length} entries, parsing prices...");
+
+                            var prices = new List<uint>();
+                            for (int i = 0; i < itemSearch.Entries.Length; i++)
                             {
-                                // Remove commas and parse price (e.g., "1,234,567" -> 1234567)
-                                var cleanPrice = priceText.Replace(",", "").Replace(" ", "").Trim();
-                                
-                                // Try to extract just the number part (in case there's "gil" or other text)
-                                var match = System.Text.RegularExpressions.Regex.Match(cleanPrice, @"(\d+)");
-                                if (match.Success && uint.TryParse(match.Groups[1].Value, out uint price))
+                                try
                                 {
-                                    // Check if this is HQ (entry.HQImageNode would be non-null if HQ)
-                                    bool isHQ = false;
-                                    try
+                                    var entry = itemSearch.Entries[i];
+                                    AtkTextNode* priceTextNode = null;
+                                    try { priceTextNode = entry.PriceTextNode; } catch { continue; }
+                                    if (priceTextNode == null) continue;
+
+                                    var nodeTextPtr = &priceTextNode->NodeText;
+                                    if (nodeTextPtr == null) continue;
+
+                                    var seString = ECommons.GenericHelpers.ReadSeString(nodeTextPtr);
+                                    var priceText = seString.TextValue;
+                                    if (string.IsNullOrEmpty(priceText)) continue;
+
+                                    var cleanPrice = priceText.Replace(",", "").Replace(" ", "").Trim();
+                                    var match = System.Text.RegularExpressions.Regex.Match(cleanPrice, @"(\d+)");
+                                    if (match.Success && uint.TryParse(match.Groups[1].Value, out uint price))
                                     {
-                                        unsafe
-                                        {
-                                            var hqNode = entry.HQImageNode;
-                                            isHQ = hqNode != null;
-                                        }
+                                        Log?.Invoke($"[AutoMarket]   Entry {i} price: {price:N0} gil");
+                                        prices.Add(price);
                                     }
-                                    catch { }
-                                    
-                                    Log?.Invoke($"[AutoMarket]   Entry {i} price: {price:N0} gil ({(isHQ ? "HQ" : "NQ")})");
-                                    
-                                    parsedPrices.Add(price);
-                                    if (price < lowestPrice)
-                                    {
-                                        lowestPrice = price;
-                                    }
-                                    parsedCount++;
                                 }
+                                catch { }
                             }
+
+                            if (prices.Count > 0)
+                                frameResult = prices;
                         }
+                        catch (System.AccessViolationException) { }
                         catch (Exception ex)
                         {
-                            Log?.Invoke($"[AutoMarket] Error parsing price from entry {i}: {ex.Message}");
-                            continue;
+                            LogError?.Invoke($"[AutoMarket] Error reading ItemSearchResult prices: {ex.Message}", ex);
                         }
                     }
-                }
-                catch (Exception ex)
+                });
+
+                if (frameResult != null)
                 {
-                    Log?.Invoke($"[AutoMarket] Error processing entry {i}: {ex.Message}");
-                    continue;
+                    parsedPrices = frameResult;
+                    break;
                 }
             }
-            
-            if (parsedCount == 0)
+
+            if (token.IsCancellationRequested) return 0;
+
+            if (parsedPrices == null || parsedPrices.Count == 0)
             {
-                Log?.Invoke("[AutoMarket] Could not parse any prices from ItemSearchResult entries");
+                LogError?.Invoke("[AutoMarket] ItemSearchResult did not appear or contained no parseable prices", null);
                 return 0;
             }
-            
-            if (lowestPrice == uint.MaxValue)
-            {
-                Log?.Invoke("[AutoMarket] No valid prices found");
-                return 0;
-            }
-            
+
             // Outlier guard: if the lowest price is below the configured % of the next lowest, skip it
-            uint adjustedLowest = lowestPrice;
+            parsedPrices.Sort();
+            uint lowestPrice = parsedPrices[0];
             int outlierPct = Plugin.Configuration.OutlierThresholdPercent;
             if (outlierPct > 0 && parsedPrices.Count >= 2)
             {
-                parsedPrices.Sort();
                 uint secondLowest = parsedPrices[1];
-                if (parsedPrices[0] * 100 < secondLowest * outlierPct)
+                if (lowestPrice * 100 < secondLowest * outlierPct)
                 {
-                    Log?.Invoke($"[AutoMarket] Ignoring outlier lowest price {parsedPrices[0]:N0} gil (below {outlierPct}% of next lowest {secondLowest:N0} gil); using {secondLowest:N0} gil");
-                    adjustedLowest = secondLowest;
+                    Log?.Invoke($"[AutoMarket] Ignoring outlier lowest price {lowestPrice:N0} gil (below {outlierPct}% of next lowest {secondLowest:N0} gil); using {secondLowest:N0} gil");
+                    lowestPrice = secondLowest;
                 }
             }
-            
-            Log?.Invoke($"[AutoMarket] Found lowest price: {adjustedLowest:N0} gil (parsed {parsedCount} entries)");
-            return adjustedLowest;
+
+            Log?.Invoke($"[AutoMarket] Found lowest price: {lowestPrice:N0} gil (parsed {parsedPrices.Count} entries)");
+            return lowestPrice;
         }
         
         public async Task<bool> CloseRetainerWindow(bool weVendored, CancellationToken token)
@@ -2075,47 +1958,45 @@ namespace AutomarketPro.Automation
             {
                 if (token.IsCancellationRequested) return false;
                 
-                unsafe
+                bool firedCallback = await RunOnFrameworkThreadAsync(() =>
                 {
-                    if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RetainerSellList", out var retainerSellList))
+                    unsafe
                     {
-                        LogError?.Invoke("[AutoMarket] RetainerSellList addon not found", null);
-                        return false;
+                        if (!ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RetainerSellList", out var retainerSellList)
+                            || retainerSellList == null || !ECommons.GenericHelpers.IsAddonReady(retainerSellList) || !retainerSellList->IsVisible)
+                        {
+                            LogError?.Invoke("[AutoMarket] RetainerSellList addon not found or not ready", null);
+                            return false;
+                        }
+                        if (itemIndex < 0)
+                        {
+                            LogError?.Invoke($"[AutoMarket] Invalid item index: {itemIndex}", null);
+                            return false;
+                        }
+                        ECommons.Automation.Callback.Fire(retainerSellList, true, 0, itemIndex, 1);
+                        return true;
                     }
-                    
-                    if (retainerSellList == null || !ECommons.GenericHelpers.IsAddonReady(retainerSellList) || !retainerSellList->IsVisible)
-                    {
-                        LogError?.Invoke("[AutoMarket] RetainerSellList addon not ready", null);
-                        return false;
-                    }
-                    
-                    if (itemIndex < 0)
-                    {
-                        LogError?.Invoke($"[AutoMarket] Invalid item index: {itemIndex}", null);
-                        return false;
-                    }
-                    
-                    ECommons.Automation.Callback.Fire(retainerSellList, true, 0, itemIndex, 1);
-                }
-                
+                });
+
+                if (!firedCallback)
+                    return false;
+
                 await Task.Delay(220, token);
                 if (token.IsCancellationRequested) return false;
-                
+
                 bool contextMenuFound = false;
                 for (int attempts = 0; attempts < 10 && !token.IsCancellationRequested; attempts++)
                 {
                     await Task.Delay(55, token);
-                    unsafe
+                    contextMenuFound = await RunOnFrameworkThreadAsync(() =>
                     {
-                        if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var contextMenu))
+                        unsafe
                         {
-                            if (contextMenu != null && ECommons.GenericHelpers.IsAddonReady(&contextMenu->AtkUnitBase))
-                            {
-                                contextMenuFound = true;
-                                break;
-                            }
+                            return ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonContextMenu>("ContextMenu", out var cm)
+                                && cm != null && ECommons.GenericHelpers.IsAddonReady(&cm->AtkUnitBase);
                         }
-                    }
+                    });
+                    if (contextMenuFound) break;
                 }
                 
                 if (!contextMenuFound)
@@ -2578,18 +2459,19 @@ namespace AutomarketPro.Automation
                                 if (token.IsCancellationRequested) break;
                             }
                             
-                            bool closedItemSearch = false;
-                            unsafe
+                            bool closedItemSearch = await RunOnFrameworkThreadAsync(() =>
                             {
-                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
+                                unsafe
                                 {
-                                    if (itemSearchAddon != null && ECommons.GenericHelpers.IsAddonReady(itemSearchAddon))
+                                    if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var isr)
+                                        && isr != null && ECommons.GenericHelpers.IsAddonReady(isr))
                                     {
-                                        itemSearchAddon->Close(true);
-                                        closedItemSearch = true;
+                                        isr->Close(true);
+                                        return true;
                                     }
                                 }
-                            }
+                                return false;
+                            });
                             
                             if (closedItemSearch)
                             {
@@ -2597,30 +2479,19 @@ namespace AutomarketPro.Automation
                                 if (token.IsCancellationRequested) break;
                             }
                             
-                            bool clickedCompare = false;
-                            bool uiReadyCheck = await IsRetainerUIReady();
-                            if (!uiReadyCheck)
+                            bool clickedCompare = await RunOnFrameworkThreadAsync(() =>
                             {
-                                LogError?.Invoke("[AutoMarket] Retainer UI is not ready when clicking Compare Price", null);
-                                break;
-                            }
-                            
-                            unsafe
-                            {
-                                
-                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSell))
+                                unsafe
                                 {
-                                    if (retainerSell != null && ECommons.GenericHelpers.IsAddonReady(&retainerSell->AtkUnitBase))
+                                    if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var rs)
+                                        && rs != null && ECommons.GenericHelpers.IsAddonReady(&rs->AtkUnitBase))
                                     {
-                                        var ui = &retainerSell->AtkUnitBase;
-                                        if (ui != null)
-                                        {
-                                            ECommons.Automation.Callback.Fire(ui, true, 4);
-                                            clickedCompare = true;
-                                        }
+                                        ECommons.Automation.Callback.Fire(&rs->AtkUnitBase, true, 4);
+                                        return true;
                                     }
                                 }
-                            }
+                                return false;
+                            });
                             
                             if (clickedCompare)
                             {
@@ -2649,36 +2520,22 @@ namespace AutomarketPro.Automation
                     {
                         LogError?.Invoke($"[AutoMarket] Could not get market price for slot {i + 1} after retries, canceling and skipping...", null);
                         
-                        try
+                        await RunOnFrameworkThreadAsync(() =>
                         {
                             unsafe
                             {
-                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var itemSearchAddon))
+                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("ItemSearchResult", out var isr)
+                                    && isr != null && ECommons.GenericHelpers.IsAddonReady(isr))
+                                    isr->Close(true);
+
+                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var rs)
+                                    && rs != null && ECommons.GenericHelpers.IsAddonReady(&rs->AtkUnitBase))
                                 {
-                                    if (itemSearchAddon != null && ECommons.GenericHelpers.IsAddonReady(itemSearchAddon))
-                                    {
-                                        itemSearchAddon->Close(true);
-                                    }
-                                }
-                                
-                                if (ECommons.GenericHelpers.TryGetAddonByName<FFXIVClientStructs.FFXIV.Client.UI.AddonRetainerSell>("RetainerSell", out var retainerSell))
-                                {
-                                    if (retainerSell != null && ECommons.GenericHelpers.IsAddonReady(&retainerSell->AtkUnitBase))
-                                    {
-                                        var ui = &retainerSell->AtkUnitBase;
-                                        if (ui != null)
-                                        {
-                                            ECommons.Automation.Callback.Fire(ui, true, 1);
-                                            ui->Close(true);
-                                        }
-                                    }
+                                    ECommons.Automation.Callback.Fire(&rs->AtkUnitBase, true, 1);
+                                    rs->AtkUnitBase.Close(true);
                                 }
                             }
-                        }
-                        catch (Exception ex)
-                        {
-                            LogError?.Invoke($"[AutoMarket] Error cleaning up windows: {ex.Message}", ex);
-                        }
+                        });
                         
                         await Task.Delay(220, token);
                         continue;
