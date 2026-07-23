@@ -9,7 +9,8 @@ Automates inventory scanning, marketboard listing, vendor selling, retainer clea
 - **Smart Listing**: Automatically lists profitable items on the Market Board with auto-undercut
 - **Vendor Automation**: Sells unprofitable items to vendors via retainers
 - **Price Management**: Adjusts prices on already-listed items to stay competitive
-- **Reprice**: Re-undercuts every item currently listed across all retainers in one click
+- **Reprice**: Re-undercuts every item currently listed across all retainers in one click, then returns to the retainer list
+- **Automatic Reprice**: Optionally runs reprice on a loop, waiting a random delay between cycles until stopped
 - **Retainer Clearing**: Pulls all listed market items back to your inventory or retainer bag in one click
 - **Outlier Price Protection**: Skips suspiciously low listings when undercutting (configurable threshold)
 - **Retainer Management**: Cycles through all available retainers automatically
@@ -49,14 +50,15 @@ Open the plugin with `/automarket` or through the Dalamud plugin menu.
 
 ### Control Bar Buttons
 
-All three quick-action buttons are always visible at the top of the window:
+All quick-action buttons are always visible at the top of the window:
 
 | Button | Description |
 |--------|-------------|
 | **[>] Start Full Cycle** | Scan inventory, then list and/or vendor items across all retainers |
 | **[S] Scan Only** | Scan inventory and fetch prices without touching retainers |
-| **[C] Clear** | Pull all listed market items back from retainers (see Clear tab for options) |
-| **[R] Reprice** | Re-undercut every currently listed item across all retainers using the current penny-pinch logic |
+| **[C] Clear** | Pull all listed market items back from retainers (configure in Settings) |
+| **[R] Reprice** | Re-undercut every currently listed item across all retainers, then return to the retainer list |
+| **[X] Stop** | Stop any running automation (shown while automation is active) |
 
 > **Tip:** Keep your mouse still while automation is running — moving it can interfere with UI interactions.
 
@@ -71,16 +73,26 @@ All three quick-action buttons are always visible at the top of the window:
 
 The **[C] Clear** button pulls all currently listed market items back from your retainers. Before using it:
 
-1. Open the **Clear** tab to configure options
+1. Open the **Settings** tab and scroll to the **Clear Settings** section to configure options
 2. Stand at your retainer bell and open the Retainer List
 3. Click **[C] Clear**
 
-**Clear tab options:**
+**Clear settings:**
 
 - **Return to Retainer Inventory** — When unchecked (default), withdrawn items go directly to your inventory. When checked, items go to the retainer's bag instead.
 - **Exclude retainers** — All retainers are cleared by default. Check a retainer's box to skip it.
 - Retainers that don't exist are always skipped automatically.
 - If the destination (your inventory or the retainer's bag) fills up, clearing stops early and a chat message tells you why.
+
+### Automatic Reprice
+
+Enable **Automatic Reprice** in Settings → Reprice Settings to run reprice on a continuous loop:
+
+1. Check **Automatic Reprice** and set a **Min** and **Max** delay in whole minutes (default 1–5)
+2. Stand at your retainer bell and open the Retainer List
+3. Click **[R] Reprice** — after each full cycle, the plugin waits a random number of minutes within your range, then runs again
+4. The status bar counts down to the next cycle
+5. Click **[X] Stop** (or use `/automarket stop`) to end the loop at any time
 
 ### Commands
 
@@ -95,27 +107,40 @@ The **[C] Clear** button pulls all currently listed market items back from your 
 
 ## Configuration
 
+All settings live in the **Settings** tab.
+
 ### Market Board Settings
 
 - **Undercut Amount**: How much to undercut the lowest listed price (default: 1 gil)
 - **Outlier Price Threshold (%)**: If the cheapest listing is below this percentage of the next cheapest, it is treated as an outlier and skipped. Set to 0 to always undercut the absolute lowest price (default: 50%)
 - **Min Profit Threshold**: Minimum profit over vendor price required to list on MB (default: 100 gil)
 - **Auto-undercut**: Automatically undercut the lowest market price when listing
+- **Data Center Scan**: Fetch prices from the entire data center instead of your home world only
+- **Manage Listed Items**: Adjust prices on already-listed retainer items to stay competitive before listing new ones
 
 ### Automation Settings
 
-- **Action Delay**: Delay between individual automation steps (default: 300ms)
-- **Retainer Delay**: Delay between switching retainers (default: 1200ms)
 - **List Only Mode**: List all items on MB regardless of profitability
 - **Vendor Only Mode**: Vendor all items regardless of profitability
-- **Manage Listed Items**: Adjust prices on already-listed retainer items to stay competitive before listing new ones
+- **Action Delay**: Delay between individual automation steps (default: 300ms)
+- **Retainer Delay**: Delay between switching retainers (default: 1200ms)
 
 ### Filter Settings
 
 - **Skip HQ Items**: Ignore high-quality items during scanning
 - **Skip Collectables**: Ignore collectable items during scanning
 - **Skip Gear**: Ignore gear items during scanning
-- **Data Center Scan**: Fetch prices from the entire data center instead of your home world only
+
+### Reprice Settings
+
+- **Automatic Reprice**: When enabled, reprice runs continuously — after each cycle, the plugin waits a random whole number of minutes between Min and Max Delay, then runs again until stopped
+- **Min Delay (minutes)**: Minimum wait between automatic reprice cycles (default: 1)
+- **Max Delay (minutes)**: Maximum wait between automatic reprice cycles (default: 5)
+
+### Clear Settings
+
+- **Return to Retainer Inventory**: When unchecked (default), withdrawn items go to your inventory; when checked, they go to the retainer's bag
+- **Exclude retainers**: Check individual retainers to skip them when clearing
 
 ### Ignore List
 

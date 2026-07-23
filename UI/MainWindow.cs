@@ -307,20 +307,6 @@ namespace AutomarketPro.UI
                     ImGui.EndTabItem();
                 }
                 
-                if (ImGui.BeginTabItem("Automation"))
-                {
-                    ImGui.Spacing();
-                    try
-                    {
-                        DrawAutomationTab();
-                    }
-                    catch (Exception ex)
-                    {
-                        ImGui.TextUnformatted($"Error in AutomationTab: {ex?.Message ?? "Unknown"}");
-                    }
-                    ImGui.EndTabItem();
-                }
-                
                 if (ImGui.BeginTabItem("Ignore"))
                 {
                     ImGui.Spacing();
@@ -335,20 +321,6 @@ namespace AutomarketPro.UI
                     ImGui.EndTabItem();
                 }
                 
-                if (ImGui.BeginTabItem("Clear"))
-                {
-                    ImGui.Spacing();
-                    try
-                    {
-                        DrawClearTab();
-                    }
-                    catch (Exception ex)
-                    {
-                        ImGui.TextUnformatted($"Error in ClearTab: {ex?.Message ?? "Unknown"}");
-                    }
-                    ImGui.EndTabItem();
-                }
-
                 if (ImGui.BeginTabItem("Settings"))
                 {
                     if (ShowSettingsTab)
@@ -681,259 +653,217 @@ namespace AutomarketPro.UI
             }
         }
         
-        private void DrawAutomationTab()
-        {
-            try
-            {
-                if (Automation == null || Scanner == null)
-                {
-                    ImGui.Text("Components not initialized yet...");
-                    return;
-                }
-                
-                ImGui.Text("Retainer Automation Control");
-                ImGui.Separator();
-                
-                ImGui.TextWrapped("This automation will:");
-                ImGui.Indent();
-                ImGui.BulletText("Scan your inventory for all sellable items");
-                ImGui.BulletText("Check current market prices via Universalis");
-                ImGui.BulletText("List profitable items on the Market Board");
-                ImGui.BulletText("Have retainers vendor-sell unprofitable items");
-                ImGui.BulletText("Cycle through all available retainers");
-                ImGui.Unindent();
-                
-                ImGui.Separator();
-                
-                // Automation status
-                if (Automation.Running)
-                {
-                    SafeTextColored(new Vector4(0, 1, 0, 1), "[*] Automation Active");
-                    var safeStatus = string.IsNullOrEmpty(AutomationStatus) ? "Ready" : AutomationStatus;
-                    SafeText($"Status: {safeStatus}");
-                    
-                    if (ImGui.Button("Stop", new Vector2(100, 30)))
-                    {
-                        Automation.StopAutomation();
-                        Scanner.StopScanning();
-                    }
-                }
-                else
-                {
-                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1), "[_] Automation Inactive");
-                    SafeText("Use the buttons in the control bar at the top to start automation.");
-                }
-                
-                ImGui.Separator();
-                ImGui.Text("Automation Options");
-                
-                var listOnlyMode = Plugin.Configuration.ListOnlyMode;
-                if (ImGui.Checkbox("List Only Mode", ref listOnlyMode))
-                {
-                    Plugin.Configuration.ListOnlyMode = listOnlyMode;
-                    // If List Only Mode is enabled, disable Vendor Only Mode
-                    if (listOnlyMode && Plugin.Configuration.VendorOnlyMode)
-                    {
-                        Plugin.Configuration.VendorOnlyMode = false;
-                    }
-                }
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("When enabled, lists ALL items on market board (even unprofitable ones)");
-                    
-                var vendorOnlyMode = Plugin.Configuration.VendorOnlyMode;
-                if (ImGui.Checkbox("Vendor Only Mode", ref vendorOnlyMode))
-                {
-                    Plugin.Configuration.VendorOnlyMode = vendorOnlyMode;
-                    // If Vendor Only Mode is enabled, disable List Only Mode
-                    if (vendorOnlyMode && Plugin.Configuration.ListOnlyMode)
-                    {
-                        Plugin.Configuration.ListOnlyMode = false;
-                    }
-                }
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("When enabled, vendors ALL items (even profitable ones)");
-            }
-            catch (Exception ex)
-            {
-                SafeTextColored(new Vector4(1, 0, 0, 1), $"Error in DrawAutomationTab: {ex?.Message ?? "Unknown"}");
-                LogError("[AutoMarket] DrawAutomationTab error", ex);
-            }
-        }
-        
-        private void DrawClearTab()
-        {
-            try
-            {
-                ImGui.TextWrapped("Pulls listed market items back from each retainer. By default, items are returned to your inventory. Retainers that don't exist are skipped. If the destination is full, clearing stops early with a chat message.");
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-
-                var config = Plugin.Configuration;
-
-                // Return destination option
-                bool returnToRetainer = config.ClearReturnToRetainerInventory;
-                if (ImGui.Checkbox("Return to Retainer Inventory##clearMode", ref returnToRetainer))
-                {
-                    config.ClearReturnToRetainerInventory = returnToRetainer;
-                    config.Save();
-                }
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1),
-                    returnToRetainer
-                        ? "(items go to retainer's bag)"
-                        : "(default: items go to your inventory)");
-
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-
-                ImGui.TextUnformatted("Exclude retainers from clearing (checked = skip):");
-                ImGui.Spacing();
-
-                if (ImGui.BeginTable("ClearRetainerTable", 2, ImGuiTableFlags.None))
-                {
-                    ImGui.TableSetupColumn("Col1", ImGuiTableColumnFlags.WidthStretch);
-                    ImGui.TableSetupColumn("Col2", ImGuiTableColumnFlags.WidthStretch);
-
-                    for (int row = 0; row < 5; row++)
-                    {
-                        ImGui.TableNextRow();
-
-                        // Left column: retainer (row+1), 0-based index = row
-                        ImGui.TableSetColumnIndex(0);
-                        int leftIndex = row;
-                        bool leftExcluded = config.ClearExcludedRetainers.Contains(leftIndex);
-                        if (ImGui.Checkbox($"Retainer {leftIndex + 1}##clearExclude{leftIndex}", ref leftExcluded))
-                        {
-                            if (leftExcluded) config.ClearExcludedRetainers.Add(leftIndex);
-                            else config.ClearExcludedRetainers.Remove(leftIndex);
-                            config.Save();
-                        }
-
-                        // Right column: retainer (row+6), 0-based index = row+5
-                        ImGui.TableSetColumnIndex(1);
-                        int rightIndex = row + 5;
-                        bool rightExcluded = config.ClearExcludedRetainers.Contains(rightIndex);
-                        if (ImGui.Checkbox($"Retainer {rightIndex + 1}##clearExclude{rightIndex}", ref rightExcluded))
-                        {
-                            if (rightExcluded) config.ClearExcludedRetainers.Add(rightIndex);
-                            else config.ClearExcludedRetainers.Remove(rightIndex);
-                            config.Save();
-                        }
-                    }
-
-                    ImGui.EndTable();
-                }
-            }
-            catch (Exception ex)
-            {
-                SafeTextColored(new Vector4(1, 0, 0, 1), $"Error in DrawClearTab: {ex?.Message ?? "Unknown"}");
-                LogError("[AutoMarket] DrawClearTab error", ex);
-            }
-        }
-
         private void DrawSettingsTab()
         {
             try
             {
-                // Add spacing before scrollable settings panel
                 ImGui.Spacing();
                 if (ImGui.BeginChild("SettingsPanel"))
                 {
-                    ImGui.Spacing(); // Spacing inside the child
+                    var config = Plugin.Configuration;
+
+                    ImGui.Spacing();
                     ImGui.Text("Market Board Settings");
                     ImGui.Separator();
-                    
-                    var undercutAmount = Plugin.Configuration.UndercutAmount;
-                    if (ImGui.DragInt("Undercut Amount", ref undercutAmount, 1, 0, 10000))
-                        Plugin.Configuration.UndercutAmount = undercutAmount;
 
-                    var outlierThreshold = Plugin.Configuration.OutlierThresholdPercent;
+                    var undercutAmount = config.UndercutAmount;
+                    if (ImGui.DragInt("Undercut Amount", ref undercutAmount, 1, 0, 10000))
+                        config.UndercutAmount = undercutAmount;
+
+                    var outlierThreshold = config.OutlierThresholdPercent;
                     if (ImGui.DragInt("Outlier Price Threshold (%)", ref outlierThreshold, 1, 0, 100))
-                        Plugin.Configuration.OutlierThresholdPercent = outlierThreshold;
+                        config.OutlierThresholdPercent = outlierThreshold;
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("If the cheapest listing is below this % of the next cheapest, it is treated as\nan outlier and skipped. Set to 0 to always undercut the absolute lowest price.");
 
-                    var minProfitThreshold = Plugin.Configuration.MinProfitThreshold;
+                    var minProfitThreshold = config.MinProfitThreshold;
                     if (ImGui.DragInt("Min Profit Threshold", ref minProfitThreshold, 1, 0, 100000))
-                        Plugin.Configuration.MinProfitThreshold = minProfitThreshold;
-                        
-                    var autoUndercut = Plugin.Configuration.AutoUndercut;
+                        config.MinProfitThreshold = minProfitThreshold;
+
+                    var autoUndercut = config.AutoUndercut;
                     if (ImGui.Checkbox("Auto-undercut lowest price", ref autoUndercut))
-                        Plugin.Configuration.AutoUndercut = autoUndercut;
-                    
-                    var dataCenterScan = Plugin.Configuration.DataCenterScan;
+                        config.AutoUndercut = autoUndercut;
+
+                    var dataCenterScan = config.DataCenterScan;
                     if (ImGui.Checkbox("Data Center Scan", ref dataCenterScan))
-                        Plugin.Configuration.DataCenterScan = dataCenterScan;
+                        config.DataCenterScan = dataCenterScan;
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("When enabled, scans the entire data center for lowest prices instead of just your world");
-                    
-                    var manageListedItems = Plugin.Configuration.ManageListedItems;
+
+                    var manageListedItems = config.ManageListedItems;
                     if (ImGui.Checkbox("Manage Listed Items", ref manageListedItems))
-                        Plugin.Configuration.ManageListedItems = manageListedItems;
+                        config.ManageListedItems = manageListedItems;
                     if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("When enabled, automatically adjusts prices of currently listed items by undercutting the cheapest market price before processing inventory");
-                    
+                        ImGui.SetTooltip("When enabled, adjusts prices of currently listed items before processing inventory");
+
                     ImGui.Separator();
                     ImGui.Text("Automation Settings");
                     ImGui.Separator();
-                    
-                    var actionDelay = Plugin.Configuration.ActionDelay;
+
+                    var listOnlyMode = config.ListOnlyMode;
+                    if (ImGui.Checkbox("List Only Mode", ref listOnlyMode))
+                    {
+                        config.ListOnlyMode = listOnlyMode;
+                        if (listOnlyMode && config.VendorOnlyMode)
+                            config.VendorOnlyMode = false;
+                    }
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("List ALL items on the market board, even unprofitable ones");
+
+                    var vendorOnlyMode = config.VendorOnlyMode;
+                    if (ImGui.Checkbox("Vendor Only Mode", ref vendorOnlyMode))
+                    {
+                        config.VendorOnlyMode = vendorOnlyMode;
+                        if (vendorOnlyMode && config.ListOnlyMode)
+                            config.ListOnlyMode = false;
+                    }
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Vendor ALL items, even profitable ones");
+
+                    var actionDelay = config.ActionDelay;
                     if (ImGui.DragInt("Action Delay (ms)", ref actionDelay, 10, 100, 5000))
-                        Plugin.Configuration.ActionDelay = actionDelay;
+                        config.ActionDelay = actionDelay;
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("Delay between automation actions");
-                        
-                    var retainerDelay = Plugin.Configuration.RetainerDelay;
+
+                    var retainerDelay = config.RetainerDelay;
                     if (ImGui.DragInt("Retainer Delay (ms)", ref retainerDelay, 10, 500, 10000))
-                        Plugin.Configuration.RetainerDelay = retainerDelay;
+                        config.RetainerDelay = retainerDelay;
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("Delay between switching retainers");
-                    
+
                     ImGui.Separator();
                     ImGui.Text("Filter Settings");
                     ImGui.Separator();
-                    
-                    var skipHQItems = Plugin.Configuration.SkipHQItems;
+
+                    var skipHQItems = config.SkipHQItems;
                     if (ImGui.Checkbox("Skip HQ Items", ref skipHQItems))
-                        Plugin.Configuration.SkipHQItems = skipHQItems;
-                        
-                    var skipCollectables = Plugin.Configuration.SkipCollectables;
+                        config.SkipHQItems = skipHQItems;
+
+                    var skipCollectables = config.SkipCollectables;
                     if (ImGui.Checkbox("Skip Collectables", ref skipCollectables))
-                        Plugin.Configuration.SkipCollectables = skipCollectables;
-                        
-                    var skipGear = Plugin.Configuration.SkipGear;
+                        config.SkipCollectables = skipCollectables;
+
+                    var skipGear = config.SkipGear;
                     if (ImGui.Checkbox("Skip Gear", ref skipGear))
-                        Plugin.Configuration.SkipGear = skipGear;
-                    
+                        config.SkipGear = skipGear;
+
+                    ImGui.Separator();
+                    ImGui.Text("Reprice Settings");
+                    ImGui.Separator();
+
+                    var autoReprice = config.AutoRepriceEnabled;
+                    if (ImGui.Checkbox("Automatic Reprice", ref autoReprice))
+                        config.AutoRepriceEnabled = autoReprice;
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("After each reprice cycle completes, automatically wait and run again until stopped");
+
+                    if (config.AutoRepriceEnabled)
+                    {
+                        ImGui.Indent();
+                        var minDelay = config.AutoRepriceMinDelayMinutes;
+                        if (ImGui.DragInt("Min Delay (minutes)##repriceMin", ref minDelay, 1, 1, 60))
+                        {
+                            config.AutoRepriceMinDelayMinutes = minDelay;
+                            if (config.AutoRepriceMaxDelayMinutes < minDelay)
+                                config.AutoRepriceMaxDelayMinutes = minDelay;
+                        }
+
+                        var maxDelay = config.AutoRepriceMaxDelayMinutes;
+                        if (ImGui.DragInt("Max Delay (minutes)##repriceMax", ref maxDelay, 1, 1, 60))
+                        {
+                            config.AutoRepriceMaxDelayMinutes = maxDelay;
+                            if (config.AutoRepriceMinDelayMinutes > maxDelay)
+                                config.AutoRepriceMinDelayMinutes = maxDelay;
+                        }
+
+                        if (config.AutoRepriceMinDelayMinutes == config.AutoRepriceMaxDelayMinutes)
+                            SafeTextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), $"Will wait exactly {config.AutoRepriceMinDelayMinutes} minute(s) between cycles.");
+                        else
+                            SafeTextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), $"Will wait a random whole number of minutes between {config.AutoRepriceMinDelayMinutes} and {config.AutoRepriceMaxDelayMinutes}.");
+                        ImGui.Unindent();
+                    }
+
+                    ImGui.Separator();
+                    ImGui.Text("Clear Settings");
+                    ImGui.Separator();
+
+                    ImGui.TextWrapped("Pulls listed market items back from retainers. Items go to your inventory by default.");
+                    ImGui.Spacing();
+
+                    bool returnToRetainer = config.ClearReturnToRetainerInventory;
+                    if (ImGui.Checkbox("Return to Retainer Inventory##clearMode", ref returnToRetainer))
+                    {
+                        config.ClearReturnToRetainerInventory = returnToRetainer;
+                        config.Save();
+                    }
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1),
+                        returnToRetainer ? "(items go to retainer's bag)" : "(default: items go to your inventory)");
+
+                    ImGui.Spacing();
+                    ImGui.TextUnformatted("Exclude retainers from clearing (checked = skip):");
+                    ImGui.Spacing();
+
+                    if (ImGui.BeginTable("ClearRetainerTable", 2, ImGuiTableFlags.None))
+                    {
+                        ImGui.TableSetupColumn("Col1", ImGuiTableColumnFlags.WidthStretch);
+                        ImGui.TableSetupColumn("Col2", ImGuiTableColumnFlags.WidthStretch);
+
+                        for (int row = 0; row < 5; row++)
+                        {
+                            ImGui.TableNextRow();
+
+                            ImGui.TableSetColumnIndex(0);
+                            int leftIndex = row;
+                            bool leftExcluded = config.ClearExcludedRetainers.Contains(leftIndex);
+                            if (ImGui.Checkbox($"Retainer {leftIndex + 1}##clearExclude{leftIndex}", ref leftExcluded))
+                            {
+                                if (leftExcluded) config.ClearExcludedRetainers.Add(leftIndex);
+                                else config.ClearExcludedRetainers.Remove(leftIndex);
+                                config.Save();
+                            }
+
+                            ImGui.TableSetColumnIndex(1);
+                            int rightIndex = row + 5;
+                            bool rightExcluded = config.ClearExcludedRetainers.Contains(rightIndex);
+                            if (ImGui.Checkbox($"Retainer {rightIndex + 1}##clearExclude{rightIndex}", ref rightExcluded))
+                            {
+                                if (rightExcluded) config.ClearExcludedRetainers.Add(rightIndex);
+                                else config.ClearExcludedRetainers.Remove(rightIndex);
+                                config.Save();
+                            }
+                        }
+
+                        ImGui.EndTable();
+                    }
+
                     ImGui.Separator();
                     ImGui.Text("Debug Settings");
                     ImGui.Separator();
-                    
-                    var debugLogsEnabled = Plugin.Configuration.DebugLogsEnabled;
+
+                    var debugLogsEnabled = config.DebugLogsEnabled;
                     if (ImGui.Checkbox("Enable Debug Logs", ref debugLogsEnabled))
-                        Plugin.Configuration.DebugLogsEnabled = debugLogsEnabled;
+                        config.DebugLogsEnabled = debugLogsEnabled;
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("When disabled, all debug logging will be suppressed");
-                    
+
                     ImGui.Separator();
-                    
+
                     if (ImGui.Button("Save Settings", new Vector2(120, 30)))
                     {
-                        Plugin.Configuration.Save();
+                        config.Save();
                         Log("[AutoMarket] Settings saved!");
                     }
-                    
+
                     ImGui.SameLine();
                     if (ImGui.Button("Reset to Defaults", new Vector2(140, 30)))
                     {
-                        Plugin.Configuration.ResetToDefaults();
-                        Plugin.Configuration.Save();
+                        config.ResetToDefaults();
+                        config.Save();
                     }
-                    
+
                     ImGui.EndChild();
-                    // Add spacing after scrollable settings panel
                     ImGui.Spacing();
                 }
             }

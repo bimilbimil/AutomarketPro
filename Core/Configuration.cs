@@ -42,6 +42,11 @@ namespace AutomarketPro.Core
         // Clear feature — when true, withdrawn items go to retainer's bag instead of player's inventory
         public bool ClearReturnToRetainerInventory { get; set; } = false;
         
+        // Reprice settings
+        public bool AutoRepriceEnabled { get; set; } = false;
+        public int AutoRepriceMinDelayMinutes { get; set; } = 1;
+        public int AutoRepriceMaxDelayMinutes { get; set; } = 5;
+
         // Debug settings
         public bool DebugLogsEnabled { get; set; } = false;
         
@@ -73,6 +78,9 @@ namespace AutomarketPro.Core
             SkipGear = false;
             DataCenterScan = false;
             ManageListedItems = false;
+            AutoRepriceEnabled = false;
+            AutoRepriceMinDelayMinutes = 1;
+            AutoRepriceMaxDelayMinutes = 5;
             DebugLogsEnabled = false;
         }
     }
